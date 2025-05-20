@@ -49,19 +49,21 @@ There are various aims targets a company could focus in deriving a foreign excha
 
 For our analysis, the focus of our optimization will be on a common risk metric in finance, Value-At-Risk or VAR.
 
-VAR is a statistical measure that gives an estimate of potential losses over a specified time period with a given confidence level. An accurate measure of VAR is key to understanding the riskiness of a portfolio. While a company manufacturing a product may not seem like an investment portfolio per se, it's most instructive in grasping foreign exchange risk to think of all international revenue as revenue that is forcibly invested in an asset that will yield a certain return. And that return will be the difference in exchange rates that arise between when the revenue is earned in the foreign currency, and when it's converted back to the domestic currency. As such, VAR is a useful metric fore measuring and optimizing foreign exchange risk.
+VAR is a statistical measure that gives an estimate of potential losses over a specified time period with a given confidence level. An accurate measure of VAR is key to understanding the riskiness of a portfolio.
+
+While a company manufacturing a product may not seem like an investment portfolio per se, it's most instructive in grasping foreign exchange risk to think of all international revenue as revenue that is forcibly invested in an asset that will yield a certain return. And that return will be the difference in exchange rates that arise between when the revenue is earned in the foreign currency, and when it's converted back to the domestic currency. As such, VAR is a useful metric fore measuring and optimizing foreign exchange risk.
 
 ## Hedging Optimization
 
-Given that VAR is a useful metric for foreign exchange risk. the aim of our optimization will be to minimize the cost of hedging across n simulations while targeting a pre-specified VAR.
+Given that VAR is a useful metric for foreign exchange risk, the aim of our optimization will be to minimize the cost of hedging across N simulations while targeting a pre-specified VAR.
 
-Initially the goal was to use a non-linear optimization framework to find the optimal hedging cost for a given target VAR, however I was unable to find a framework that could consistently converge to a proper solution. As such, I opted instead to use a brute force optimization strategy where by 5000 simulations would be run with randomly assigned hedging ratios, and the top performing portolfio would be chosen as the optimal solution.
+Initially the goal was to use a non-linear optimization framework to find the optimal hedging cost for a given target VAR, however I was unable to find a framework that could consistently converge to a proper solution. As such, I opted instead to use a brute force optimization strategy whereby 5000 simulations would be run with randomly assigned hedging ratios, and only those portfolios that met the VAR target would be drawn to calculate the most optimal portfolio based upon a minimization of hedging cost.
 
 ### Objective Function
 
 $\begin{aligned}
 & {\text{minimize}}
-& & \sum_{n=0}^{n =500} hedgingCost  \\
+& & \sum_{n=0}^{n =5000} hedgingCost  \\
 & \text{subject to}
 & & VAR = Target\ VAR
 \end{aligned}$
@@ -555,7 +557,7 @@ Understanding the sensitivity of the VAR to dollars invested in hedging is what 
 
 #### Regression Analysis
 
-To ascertain the hedging effectiveness we'll use a simple linear regression model to analyze the reduction in VAR as hedging dollars increase. The model will be run on a total of 320 optimized VAR portfolios, across four different optimization scenarios with VAR 95\$ confidence targets of .1.5%, 2%, 3% and 4% of forecast VAR as percentage of baseline uhedged revenue.
+To ascertain the hedging effectiveness we'll use a simple linear regression model to analyze the reduction in VAR as hedging dollars increase. The model will be run on a total of 320 optimized VAR portfolios, across four different optimization scenarios with VAR 95% confidence targets of .1.5%, 2%, 3% and 4% of forecast VAR as percentage of baseline unhedged revenue.
 
 The regression formula is shown below:
 
