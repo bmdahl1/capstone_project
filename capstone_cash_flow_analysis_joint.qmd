@@ -3,6 +3,7 @@ title: "Capstone - Simulated Cash Flow Analysis"
 author: "Brandon Dahl"
 format:
    html:
+    code-overflow: wrap
     theme: sandstone
     embed-resources: true
     toc: true
@@ -120,7 +121,7 @@ current_exchange_rates <- xts::merge.xts(x = USDEUR,
 
 ## Revenue
 
-Below are Regenerons historical revenue statistics, and forecast revenue taken from a consensus of financial analysts.
+Below are Regenerons historical revenue statitistics as well as 10-year forecasts of revenue taken from a consensus of analysts.
 
 ```{r clean_revenue_data}
 #| include: false
@@ -172,6 +173,10 @@ joint_revenue |>
 
 ### Revenue By Region
 
+The revenue by region statistics will allow us to calculate how much of future forecast revenue will be exposed to international exchange rates.
+
+Unfortunately, we're missing revenue breakdown by country, as well as cost breakdown by country, so we won't be able to pinpoint Regeneron's net foreign exchange exposure.
+
 ```{r table_revenue_by_region}
 #| echo: false
 
@@ -199,16 +204,16 @@ Regeneron has noted the following in their 2024 10K:
 
 Source: Form 10K, Other Risk Related To Our Business
 
-As such, we'll analyze the impacts to forecast future cash flows based upon exposure to the following currencies:
+As such, we'll analyze the impacts to forecast future cash flows based upon exposure to the following currencies. As noted previously, we don't have the actual data on how much exposure Regeneron has to each currency. Accordingly, our analysis will assume that the vast majority of the revenue is concentrated in Western countries.
 
-| Currency          | Symbol |
-|-------------------|--------|
-| Japanese Yen      | JPY    |
-| Euro              | EUR    |
-| British Pound     | GBP    |
-| Canadian Dollar   | CAD    |
-| Chinese Yuan      | CYN    |
-| Australian Dollar | AUD    |
+| Currency          | Symbol | Percentage |
+|-------------------|--------|------------|
+| Japanese Yen      | JPY    | 10%        |
+| Euro              | EUR    | 40%        |
+| British Pound     | GBP    | 20%        |
+| Canadian Dollar   | CAD    | 10%        |
+| Chinese Yuan      | CYN    | 10%        |
+| Australian Dollar | AUD    | 10%        |
 
 : Foreign Currencies
 
@@ -360,6 +365,7 @@ cash_flow_stats_sim_sum <- cash_flow_stats_sim |>
 cash_flows_stats_currency |> 
   mutate(country = toupper(country)) |> 
   gt::gt() |> 
+  # Create Spanner Labels
   gt::tab_spanner(label = 'Exchange Rate', columns = contains('exchange')) |> 
   gt::tab_spanner(label = 'Total Revenue (USD', columns = contains('rev')) |> 
   gt::tab_spanner(label = 'Comparison With Base Forecast', columns = contains('than')) |> 
@@ -386,7 +392,17 @@ cash_flows_stats_currency |>
   gt::fmt_number(columns = contains('exchange'), decimals = 2) |> 
   gt::fmt_currency(columns = contains('rev'), decimals = 0) |> 
   gt::fmt_percent(columns = contains('pct'), decimals = 2) |> 
-  gt::tab_header(title = 'Cash Flow Simulation Results')
+  gt::tab_header(title = 'Cash Flow Simulation Results') |> 
+  # Add Borders
+  tab_style(
+    style = cell_borders(
+      sides = c("right"),
+      color = "black",
+      weight = px(1.5),
+      style = "solid"
+    ),
+    locations = cells_body(columns = c(n_sim, exchange_rate_current, rev_current))
+  )
 
 ```
 
@@ -412,9 +428,18 @@ cash_flow_stats_sim_sum |>
                  rev_sim_var = '95% VAR',
                  rev_sim_var_pct = '95% VAR Pct') |> 
   gt::fmt_currency(columns = !contains('pct'), decimals = 0) |> 
-  gt::fmt_percent(columns = contains('pct'), decimals = 2)
+  gt::fmt_percent(columns = contains('pct'), decimals = 2) |> 
+  # Add Borders
+  tab_style(
+    style = cell_borders(
+      sides = c("right"),
+      color = "black",
+      weight = px(1.5),
+      style = "solid"
+    ),
+    locations = cells_body(columns = c(rev_current,rev_sim_sd))
+  )
   
-
 ```
 
 ### Simulation Plots
