@@ -1,0 +1,615 @@
+---
+title: "Capstone - VAR Optimization"
+author: "Brandon Dahl"
+format:
+   html:
+    code-overflow: wrap
+    theme: sandstone
+    embed-resources: true
+    toc: true
+    toc-depth: 4
+editor: visual
+---
+
+```{r import_libraries}
+#| include: false
+
+# Clear Variables
+rm(list = ls())
+
+# Import Tidyverse Libraries
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(gt)
+
+# Turn Off Scientific Notation
+options(scipen = 100)
+options(digits = 6)
+options(dplyr.summarise.inform = FALSE)
+
+```
+
+```{r import_cash_flow_setup}
+#| include: false
+
+# Import Cash Flow Setup
+cash_flow_setup <- readRDS(file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+                                         'Capstone/project/modeling/correlated_cash_flow_setup.rds'))
+
+
+```
+
+## Hedging Strategy
+
+After creating our forecasts of possible exchange rate paths using Geometric Brownian Motion for the six currencies to which Regeneron is exposed, the next phase of our analysis is to devise a hedging strategy.
+
+There are various aims targets a company could focus in deriving a foreign exchange hedging strategy, from reducing volatility in earnings to reducing maximum possible losses. Regardless of the specific measure a company takes, all of it will revolve around reducing risk to the company.
+
+For our analysis, the focus of our optimization will be on a common risk metric in finance, Value-At-Risk or VAR.
+
+VAR is a statistical measure that gives an estimate of potential losses over a specified time period with a given confidence level. An accurate measure of VAR is key to understanding the riskiness of a portfolio. While a company manufacturing a product may not seem like an investment portfolio per se, it's most instructive in grasping foreign exchange risk to think of all international revenue as revenue that is forcibly invested in an asset that will yield a certain return. And that return will be the difference in exchange rates that arise between when the revenue is earned in the foreign currency, and when it's converted back to the domestic currency. As such, VAR is a useful metric fore measuring and optimizing foreign exchange risk.
+
+## Hedging Optimization
+
+Given that VAR is a useful metric for foreign exchange risk. the aim of our optimization will be to minimize the cost of hedging across n simulations while targeting a pre-specified VAR.
+
+Initially the goal was to use a non-linear optimization framework to find the optimal hedging cost for a given target VAR, however I was unable to find a framework that could consistently converge to a proper solution. As such, I opted instead to use a brute force optimization strategy where by 5000 simulations would be run with randomly assigned hedging ratios, and the top performing portolfio would be chosen as the optimal solution.
+
+### Objective Function
+
+$\begin{aligned}
+& {\text{minimize}}
+& & \sum_{n=0}^{n =500} hedgingCost  \\
+& \text{subject to}
+& & VAR = Target\ VAR
+\end{aligned}$
+
+## Setup Optimization & Data Functions
+
+### Configure Cash Flows
+
+```{r}
+
+# Create Optimization Dataset
+opt_df <- cash_flow_setup |> 
+  # Filter Columns
+  select(-c(contains('rev_current_daily_sim'),
+            rev_total_current,
+            rev_total_current_sim))  |> 
+  # Add Optimized Columns
+  mutate(opt_hedge_ratio_aud = NA_real_,
+         opt_hedge_ratio_cad = NA_real_,
+         opt_hedge_ratio_cny = NA_real_,
+         opt_hedge_ratio_eur = NA_real_,
+         opt_hedge_ratio_gbp = NA_real_,
+         opt_hedge_ratio_jpy = NA_real_,
+         # Hedged Cash
+         opt_hedged_cash_aud = NA_real_,
+         opt_hedged_cash_cad = NA_real_,
+         opt_hedged_cash_cny = NA_real_,
+         opt_hedged_cash_eur = NA_real_,
+         opt_hedged_cash_gbp = NA_real_,
+         opt_hedged_cash_jpy = NA_real_,
+         # Non-Hedged Cash
+         opt_non_hedged_cash_aud = NA_real_,
+         opt_non_hedged_cash_cad = NA_real_,
+         opt_non_hedged_cash_cny = NA_real_,
+         opt_non_hedged_cash_eur = NA_real_,
+         opt_non_hedged_cash_gbp = NA_real_,
+         opt_non_hedged_cash_jpy = NA_real_,
+         # Hedge Cost
+         opt_hedge_cost_aud = NA_real_,
+         opt_hedge_cost_cad = NA_real_,
+         opt_hedge_cost_cny = NA_real_,
+         opt_hedge_cost_eur = NA_real_,
+         opt_hedge_cost_gbp = NA_real_,
+         opt_hedge_cost_jpy = NA_real_,
+         # Totals
+         opt_total_cash_hedged = NA_real_,
+         opt_total_cash_non_hedged = NA_real_,
+         opt_total_hedge_cost = NA_real_,
+         opt_total_cash = NA_real_) |> 
+  # Arrange
+  arrange(sim, days)
+
+
+```
+
+## Setup Optimization Functions
+
+### Hedging Function
+
+```{r create_hedging_function}
+
+hedging_function <- function(aud_hedge_ratio, cad_hedge_ratio, cny_hedge_ratio, eur_hedge_ratio,
+                             gbp_hedge_ratio, jpy_hedge_ratio, hedge_cost_pct){
+  
+  # Perform Hedging Calculation
+  opt_df_hedged <- opt_df |> 
+    # Add In Hedge Ratio
+    mutate(opt_hedge_ratio_aud = aud_hedge_ratio,
+           opt_hedge_ratio_cad = cad_hedge_ratio,
+           opt_hedge_ratio_cny = cny_hedge_ratio,
+           opt_hedge_ratio_eur = eur_hedge_ratio,
+           opt_hedge_ratio_gbp = gbp_hedge_ratio,
+           opt_hedge_ratio_jpy = jpy_hedge_ratio) |> 
+    # Calculate Hedged Cash
+    mutate(opt_hedged_cash_aud = (rev_current_daily_aud*opt_hedge_ratio_aud*exchange_rate_current_aud)/exchange_rate_current_aud,
+           opt_hedged_cash_cad = (rev_current_daily_cad*opt_hedge_ratio_cad*exchange_rate_current_cad)/exchange_rate_current_cad,
+           opt_hedged_cash_cny = (rev_current_daily_cny*opt_hedge_ratio_cny*exchange_rate_current_cny)/exchange_rate_current_cny,
+           opt_hedged_cash_eur = (rev_current_daily_eur*opt_hedge_ratio_eur*exchange_rate_current_eur)/exchange_rate_current_eur,
+           opt_hedged_cash_gbp = (rev_current_daily_gbp*opt_hedge_ratio_gbp*exchange_rate_current_gbp)/exchange_rate_current_gbp,
+           opt_hedged_cash_jpy = (rev_current_daily_jpy*opt_hedge_ratio_jpy*exchange_rate_current_jpy)/exchange_rate_current_jpy) |> 
+    # Calculate Non-Hedged Cash
+    mutate(opt_non_hedged_cash_aud = (rev_current_daily_aud*(1 - opt_hedge_ratio_aud)*exchange_rate_current_aud)/simulated_rate_aud,
+           opt_non_hedged_cash_cad = (rev_current_daily_cad*(1 - opt_hedge_ratio_cad)*exchange_rate_current_cad)/simulated_rate_cad,
+           opt_non_hedged_cash_cny = (rev_current_daily_cny*(1 - opt_hedge_ratio_cny)*exchange_rate_current_cny)/simulated_rate_cny,
+           opt_non_hedged_cash_eur = (rev_current_daily_eur*(1 - opt_hedge_ratio_eur)*exchange_rate_current_eur)/simulated_rate_eur,
+           opt_non_hedged_cash_gbp = (rev_current_daily_gbp*(1 - opt_hedge_ratio_gbp)*exchange_rate_current_gbp)/simulated_rate_gbp,
+           opt_non_hedged_cash_jpy = (rev_current_daily_jpy*(1 - opt_hedge_ratio_jpy)*exchange_rate_current_jpy)/simulated_rate_jpy) |> 
+    # Calculate Hedge Cost
+    mutate(opt_hedge_cost_aud = rev_current_daily_aud*opt_hedge_ratio_aud*hedge_cost_pct,
+           opt_hedge_cost_cad = rev_current_daily_cad*opt_hedge_ratio_cad*hedge_cost_pct,
+           opt_hedge_cost_cny = rev_current_daily_cny*opt_hedge_ratio_cny*hedge_cost_pct,
+           opt_hedge_cost_eur = rev_current_daily_eur*opt_hedge_ratio_eur*hedge_cost_pct,
+           opt_hedge_cost_gbp = rev_current_daily_gbp*opt_hedge_ratio_gbp*hedge_cost_pct,
+           opt_hedge_cost_jpy = rev_current_daily_jpy*opt_hedge_ratio_jpy*hedge_cost_pct) |> 
+    # Calculate Currency Totals
+    mutate(opt_total_cash_aud = opt_hedged_cash_aud + opt_non_hedged_cash_aud,
+           opt_total_cash_cad = opt_hedged_cash_cad + opt_non_hedged_cash_cad,
+           opt_total_cash_cny = opt_hedged_cash_cny + opt_non_hedged_cash_cny,
+           opt_total_cash_eur = opt_hedged_cash_eur + opt_non_hedged_cash_eur,
+           opt_total_cash_gbp = opt_hedged_cash_gbp + opt_non_hedged_cash_gbp,
+           opt_total_cash_jpy = opt_hedged_cash_jpy + opt_non_hedged_cash_jpy) |> 
+    # Calculate Total Revenue
+    mutate(opt_total_revenue_aud = opt_total_cash_aud - opt_hedge_cost_aud,
+           opt_total_revenue_cad = opt_total_cash_cad - opt_hedge_cost_cad,
+           opt_total_revenue_cny = opt_total_cash_cny - opt_hedge_cost_cny,
+           opt_total_revenue_eur = opt_total_cash_eur - opt_hedge_cost_eur,
+           opt_total_revenue_gbp = opt_total_cash_gbp - opt_hedge_cost_gbp,
+           opt_total_revenue_jpy = opt_total_cash_jpy - opt_hedge_cost_jpy) |> 
+    # Calculate Totals
+    mutate(opt_total_cash_baseline = rowSums(across(starts_with('rev_current_daily_')), na.rm = TRUE),
+           opt_total_cash_hedged = rowSums(across(starts_with('opt_hedged_cash_')), na.rm = TRUE),
+           opt_total_cash_non_hedged = rowSums(across(starts_with('opt_non_hedged_cash_')), na.rm = TRUE),
+           opt_total_hedge_cost = rowSums(across(starts_with('opt_hedge_cost_')), na.rm = TRUE),
+           opt_total_cash = rowSums(across(starts_with('opt_total_cash_')), na.rm = TRUE),
+           opt_total_revenue = rowSums(across(starts_with('opt_total_revenue')), na.rm = TRUE),
+           opt_total_cash_gain_loss = opt_total_revenue - opt_total_cash_baseline,
+           opt_total_cash_gain_loss_pct = opt_total_cash_gain_loss/opt_total_cash_baseline) |> 
+    # Order Data
+    arrange(sim, days)
+  
+  # Create Comprehensive Simulation Summary
+  opt_df_hedged_summary <- opt_df_hedged |> 
+    group_by(sim) |>
+    # Simulated Exchange Rates
+    summarise(simulated_rate_aud = mean(simulated_rate_aud, na.rm = TRUE),
+              simulated_rate_cad = mean(simulated_rate_cad, na.rm = TRUE),
+              simulated_rate_cny = mean(simulated_rate_cny, na.rm = TRUE),
+              simulated_rate_eur = mean(simulated_rate_eur, na.rm = TRUE),
+              simulated_rate_gbp = mean(simulated_rate_gbp, na.rm = TRUE),
+              simulated_rate_jpy = mean(simulated_rate_jpy, na.rm = TRUE),
+              # Current Exchange Rates
+              exchange_rate_current_aud = mean(exchange_rate_current_aud, na.rm = TRUE),
+              exchange_rate_current_cad = mean(exchange_rate_current_cad, na.rm = TRUE),
+              exchange_rate_current_cny = mean(exchange_rate_current_cny, na.rm = TRUE),
+              exchange_rate_current_eur = mean(exchange_rate_current_eur, na.rm = TRUE),
+              exchange_rate_current_gbp = mean(exchange_rate_current_gbp, na.rm = TRUE),
+              exchange_rate_current_jpy = mean(exchange_rate_current_jpy, na.rm = TRUE),
+              # Rev Percent
+              rev_pct_aud = mean(rev_pct_aud, na.rm = TRUE),
+              rev_pct_cad = mean(rev_pct_cad, na.rm = TRUE),
+              rev_pct_cny = mean(rev_pct_cny, na.rm = TRUE),
+              rev_pct_eur = mean(rev_pct_eur, na.rm = TRUE),
+              rev_pct_gbp = mean(rev_pct_gbp, na.rm = TRUE),
+              rev_pct_jpy = mean(rev_pct_jpy, na.rm = TRUE),
+              # Optimized Hedge Ratios
+              opt_hedge_ratio_aud = mean(opt_hedge_ratio_aud, na.rm = TRUE),
+              opt_hedge_ratio_cad = mean(opt_hedge_ratio_cad, na.rm = TRUE),
+              opt_hedge_ratio_cny = mean(opt_hedge_ratio_cny, na.rm = TRUE),
+              opt_hedge_ratio_eur = mean(opt_hedge_ratio_eur, na.rm = TRUE),
+              opt_hedge_ratio_gbp = mean(opt_hedge_ratio_gbp, na.rm = TRUE),
+              opt_hedge_ratio_jpy = mean(opt_hedge_ratio_jpy, na.rm = TRUE),
+              # Optimized Hedge Cash
+              opt_hedged_cash_aud = sum(opt_hedged_cash_aud, na.rm = TRUE),
+              opt_hedged_cash_cad = sum(opt_hedged_cash_cad, na.rm = TRUE),
+              opt_hedged_cash_cny = sum(opt_hedged_cash_cny, na.rm = TRUE),
+              opt_hedged_cash_eur = sum(opt_hedged_cash_eur, na.rm = TRUE),
+              opt_hedged_cash_gbp = sum(opt_hedged_cash_gbp, na.rm = TRUE),
+              opt_hedged_cash_jpy = sum(opt_hedged_cash_jpy, na.rm = TRUE),
+              # Optimized Non-Hedged Cash
+              opt_non_hedged_cash_aud = sum(opt_non_hedged_cash_aud, na.rm = TRUE),
+              opt_non_hedged_cash_cad = sum(opt_non_hedged_cash_cad, na.rm = TRUE),
+              opt_non_hedged_cash_cny = sum(opt_non_hedged_cash_cny, na.rm = TRUE),
+              opt_non_hedged_cash_eur = sum(opt_non_hedged_cash_eur, na.rm = TRUE),
+              opt_non_hedged_cash_gbp = sum(opt_non_hedged_cash_gbp, na.rm = TRUE),
+              opt_non_hedged_cash_jpy = sum(opt_non_hedged_cash_jpy, na.rm = TRUE),
+              # Optimized Hedge Cost
+              opt_hedge_cost_aud = sum(opt_hedge_cost_aud, na.rm = TRUE),
+              opt_hedge_cost_cad = sum(opt_hedge_cost_cad, na.rm = TRUE),
+              opt_hedge_cost_cny = sum(opt_hedge_cost_cny, na.rm = TRUE),
+              opt_hedge_cost_eur = sum(opt_hedge_cost_eur, na.rm = TRUE),
+              opt_hedge_cost_gbp = sum(opt_hedge_cost_gbp, na.rm = TRUE),
+              opt_hedge_cost_jpy = sum(opt_hedge_cost_jpy, na.rm = TRUE),
+              # Optimized Total Cash
+              opt_total_cash_aud = sum(opt_total_cash_aud, na.rm = TRUE),
+              opt_total_cash_cad = sum(opt_total_cash_cad, na.rm = TRUE),
+              opt_total_cash_cny = sum(opt_total_cash_cny, na.rm = TRUE),
+              opt_total_cash_eur = sum(opt_total_cash_eur, na.rm = TRUE),
+              opt_total_cash_gbp = sum(opt_total_cash_gbp, na.rm = TRUE),
+              opt_total_cash_jpy = sum(opt_total_cash_jpy, na.rm = TRUE),
+              # optimized Total Revenue
+              opt_total_revenue_aud = sum(opt_total_revenue_aud, na.rm = TRUE),
+              opt_total_revenue_cad = sum(opt_total_revenue_cad, na.rm = TRUE),
+              opt_total_revenue_cny = sum(opt_total_revenue_cny, na.rm = TRUE),
+              opt_total_revenue_eur = sum(opt_total_revenue_eur, na.rm = TRUE),
+              opt_total_revenue_gbp = sum(opt_total_revenue_gbp, na.rm = TRUE),
+              opt_total_revenue_jpy = sum(opt_total_revenue_jpy, na.rm = TRUE),
+              # Calculate Totals
+              opt_total_hedge_cost = sum(opt_total_hedge_cost, na.rm = TRUE),
+              opt_total_cash_baseline = sum(opt_total_cash_baseline, na.rm = TRUE),
+              opt_total_revenue = sum(opt_total_revenue, na.rm = TRUE)) |> 
+    ungroup() |> 
+    mutate(opt_total_cash_gain_loss = opt_total_revenue - opt_total_cash_baseline,
+           opt_total_cash_gain_loss_pct = opt_total_cash_gain_loss/opt_total_cash_baseline)
+  
+  # Monte Carlo Summary
+  opt_df_hedged_mc_summary <- opt_df_hedged_summary |>
+    summarise(opt_total_hedge_cost_mean = mean(opt_total_hedge_cost, na.rm = TRUE),
+              opt_total_cash_baseline_mean = mean(opt_total_cash_baseline, na.rm = TRUE),
+              opt_total_revenue_mean = mean(opt_total_revenue, na.rm = TRUE),
+              opt_total_cash_gain_loss_mean = opt_total_revenue_mean - opt_total_cash_baseline_mean,
+              opt_total_var = quantile(opt_total_cash_gain_loss, probs = .05),
+              opt_total_var_pct = opt_total_var/opt_total_revenue_mean)
+  
+  # Return List
+  return(list(opt_df_hedged = opt_df_hedged,
+              opt_df_hedged_summary = opt_df_hedged_summary,
+              opt_df_hedged_mc_summary = opt_df_hedged_mc_summary))
+  
+}
+
+```
+
+## Run Optimization
+
+To increase the likelihood of finding an optimal portfolio for each given target VAR, constraints were placed on the minimum hedge percentages allowed for each target.
+
+### Set Optimization Parameters
+
+```{r}
+
+# Set Optimal Hedge Cost
+opt_hedge_cost_pct <- .005
+
+# Set Target Var
+target_var_ratio <- c(.04, .03, .02, .015)
+
+# Set Min Hedging
+min_hedge_pcts <- c(0, .1, .25, .5)
+
+```
+
+### Perform Brute Force Optimization
+
+```{r}
+#| include: false
+
+# Read In
+optimized_sims <- readRDS(file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+                                         'Capstone/project/modeling/optimization_results.rds'))
+
+
+```
+
+```{r}
+
+# # Create Optimized Simulations
+# optimized_sims <- data.frame()
+#   
+# # Loop Through Vars
+# for (v in 1:length(target_var_ratio)){
+#   
+#   # Set Temp Target Var
+#   temp.target.var <- target_var_ratio[v]
+#   
+#   # Get Target VAR
+#   target_var <- (hedging_function(aud_hedge_ratio = 0,
+#                                   cad_hedge_ratio = 0,
+#                                   cny_hedge_ratio = 0,
+#                                   eur_hedge_ratio = 0,
+#                                   gbp_hedge_ratio = 0,
+#                                   jpy_hedge_ratio = 0,
+#                                   hedge_cost_pct = 0) |> 
+#                    purrr::simplify() |> 
+#                    dplyr::last() |> 
+#                    pull(opt_total_cash_baseline_mean))*temp.target.var
+#   
+#   # Setup Simulations
+#   total_sims <- 5000
+#   
+#   # Optimized Sims Count
+#   optim_sim_cnt <- 0
+#   
+#   # Notify user
+#   paste0('Performing Optimization For Target Var: ', temp.target.var) |> print()
+#   
+#   # Perform Simulation
+#   for (s in 1:total_sims){
+#     
+#     # Get Random
+#     temp.rand.aud <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+#     temp.rand.cad <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+#     temp.rand.cny <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+#     temp.rand.eur <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+#     temp.rand.gbp <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+#     temp.rand.jpy <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+#     
+#     # Run Function
+#     temp.hedge <- hedging_function(aud_hedge_ratio = temp.rand.aud,
+#                                    cad_hedge_ratio = temp.rand.cad,
+#                                    cny_hedge_ratio = temp.rand.cny,
+#                                    eur_hedge_ratio = temp.rand.eur,
+#                                    gbp_hedge_ratio = temp.rand.gbp,
+#                                    jpy_hedge_ratio = temp.rand.jpy,
+#                                    hedge_cost_pct = opt_hedge_cost_pct)
+#     
+#     # Get Temp Var
+#     temp.var <- temp.hedge$opt_df_hedged_mc_summary$opt_total_var
+#     
+#     # Check
+#     if (all(abs(temp.var) <= (target_var + 1), 
+#             abs(temp.var) >= (target_var - 1))){
+#       
+#       # Increase Counter
+#       optim_sim_cnt <- optim_sim_cnt + 1
+#       
+#       # Notify user
+#       paste0('    ',optim_sim_cnt,' Optimized Portfolios Found') |> print()
+#       
+#       # Test
+#       temp.optimized <- data.frame(target_var = temp.target.var,
+#                                    aud_hedge_ratio = temp.rand.aud,
+#                                    cad_hedge_ratio = temp.rand.cad,
+#                                    cny_hedge_ratio = temp.rand.cny,
+#                                    eur_hedge_ratio = temp.rand.eur,
+#                                    gbp_hedge_ratio = temp.rand.gbp,
+#                                    jpy_hedge_ratio = temp.rand.jpy,
+#                                    opt_total_hedge_cost_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_hedge_cost_mean,
+#                                    opt_total_cash_baseline_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_cash_baseline_mean,
+#                                    opt_total_revenue_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_revenue_mean,
+#                                    opt_total_cash_gain_loss_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_cash_gain_loss_mean,
+#                                    opt_total_var = temp.hedge$opt_df_hedged_mc_summary$opt_total_var)
+#                                    
+#       # Save Optimized Portfolios
+#       optimized_sims <- rbind(optimized_sims,
+#                               temp.optimized) |> 
+#         arrange(opt_total_hedge_cost_mean)
+#                                  
+#     }
+#   
+#   }
+# 
+# }
+
+```
+
+```{r export_optimized_results}
+#| include: false
+
+# # Export to RDS
+# optimized_sims |> 
+  # saveRDS(object = _, file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+  #                                        'Capstone/project/modeling/optimization_results.rds'))
+
+```
+
+## Optimization Results
+
+### Extract Optimal Portfolio For Each Target VAR
+
+```{r}
+
+# Compute Best Portfolio
+optimized_sims_clean <- optimized_sims |> 
+  group_by(target_var) |> 
+  arrange(desc(opt_total_hedge_cost_mean)) |> 
+  slice(1L) |> 
+  ungroup()
+  
+```
+
+### Optimal Hedging
+
+Below you can see optimized hedging results for each VAR 95% target in the optimization:
+
+-   1.5% of Baseline Revenue VAR
+
+-   2% of baseline revenue VAR
+
+-   3% of baseline revenue VAR
+
+-   4% of baseline revenue VAR
+
+The key takeaways from the optimization are the following:
+
+1.  Based on forecast exchange rates, the unhedged position leads to the greatest mean revenue
+2.  VAR targets at 3% and above maintain higher than baseline revenue, while targets below 2% are below baseline revenue.
+
+```{r calculate_optimal_hedging}
+#| include: false
+
+# Get Optimized Hedge Ratios
+optimized_hedge_ratios <- subset(optimized_sims_clean, target_var == .015) |> select(contains('ratio'))
+
+# Get Zero Hedge Simulation
+optimized_sim_hedge <- hedging_function(aud_hedge_ratio = optimized_hedge_ratios$aud_hedge_ratio,
+                                        cad_hedge_ratio = optimized_hedge_ratios$cad_hedge_ratio,
+                                        cny_hedge_ratio = optimized_hedge_ratios$cny_hedge_ratio,
+                                        eur_hedge_ratio = optimized_hedge_ratios$eur_hedge_ratio,
+                                        gbp_hedge_ratio = optimized_hedge_ratios$gbp_hedge_ratio,
+                                        jpy_hedge_ratio = optimized_hedge_ratios$jpy_hedge_ratio,
+                                        hedge_cost_pct = opt_hedge_cost_pct) |> 
+  purrr::simplify() |> 
+  dplyr::nth(n = 2) |> 
+  mutate(Hedged = 'Yes')
+  
+# Get Optimized Hedge Simulation
+optimized_zero_hedge <- hedging_function(aud_hedge_ratio = 0,
+                                        cad_hedge_ratio = 0,
+                                        cny_hedge_ratio = 0,
+                                        eur_hedge_ratio = 0,
+                                        gbp_hedge_ratio = 0,
+                                        jpy_hedge_ratio = 0,
+                                        hedge_cost_pct = opt_hedge_cost_pct) |> 
+  purrr::simplify() |> 
+  dplyr::nth(n = 2) |> 
+  mutate(Hedged = 'No')
+
+# Create Joint Hedging
+optimized_hedging_joint <- optimized_sim_hedge |> 
+  union(x = _, y = optimized_zero_hedge) |> 
+  arrange(Hedged, sim)
+
+
+```
+
+```{r optimal_hedging_table}
+#| echo: false
+
+optimized_sims_clean |> 
+  mutate(opt_total_var_pct = abs(opt_total_var)/opt_total_cash_baseline_mean,
+         opt_total_var_pct = round(opt_total_var_pct, 4)) |> 
+  gt::gt() |> 
+  gt::tab_options(table.align = 'left',
+                  table.font.size = 12) |> 
+  gt::tab_header(title = 'Optimized Hedging Strategy') |> 
+  gt::cols_label(target_var = 'Target VAR Pct',
+                 aud_hedge_ratio = 'AUD Hedge Ratio',
+                 cad_hedge_ratio = 'CAD Hedge Ratio',
+                 cny_hedge_ratio = 'CNY Hedge Ratio',
+                 eur_hedge_ratio = 'EUR Hedge Ratio',
+                 gbp_hedge_ratio = 'GBP Hedge Ratio',
+                 jpy_hedge_ratio = 'JPY Hedge Ratio',
+                 opt_total_hedge_cost_mean = 'Hedge Cost Mean',
+                 opt_total_cash_baseline_mean = 'Basline Revenue',
+                 opt_total_revenue_mean = ' Hedged Revenue Mean',
+                 opt_total_cash_gain_loss_mean = 'Gain/Loss vs. Baseline',
+                 opt_total_var = 'Var 95%',
+                 opt_total_var_pct = 'VAR 95% Pct') |> 
+  gt::tab_spanner(label = 'Optimized Hedge Ratios', columns = contains('ratio')) |> 
+  gt::tab_spanner(label = 'Optimized Hedge Performance', columns = contains('opt')) |>
+  # Format Values
+  gt::fmt_percent(columns = contains(c('ratio')), decimals = 2) |> 
+  gt::fmt_currency(columns = contains(c('mean','total_var')), decimals = 0) |> 
+  gt::fmt_percent(columns = contains('pct'), decimals = 2) |> 
+  # Add Borders
+  tab_style(
+    style = cell_borders(
+      sides = c("right"),
+      color = "black",
+      weight = px(1.5),
+      style = "solid"
+    ),
+    locations = cells_body(columns = c(target_var,jpy_hedge_ratio))
+  )
+
+```
+
+```{r optimal_hedging_plot}
+#| echo: false
+
+optimized_hedging_joint |> 
+  mutate(category = factor(Hedged, levels = c('Yes','No'))) |> 
+  ggplot(aes(x = opt_total_revenue, fill = Hedged)) +
+  geom_histogram(alpha = .5, bins = 50,  position = 'identity') +
+  geom_vline(xintercept = optimized_hedging_joint |> 
+               filter(Hedged == 'No') |> 
+               pull(opt_total_revenue) |> 
+               mean(), 
+             color = 'red', 
+             alpha = .5,
+             linetype = 'dashed', 
+             lwd = 1) +
+  geom_vline(xintercept = optimized_hedging_joint |> 
+               filter(Hedged == 'Yes') |> 
+               pull(opt_total_revenue) |> 
+               mean(), 
+             color = '#00BFC4', 
+             alpha = 1,
+             linetype = 'dashed', 
+             lwd = 1) +
+  xlab('Optimized Total Revenuye') +
+  ggtitle('Hedged vs. Non-Hedged Portfolio') 
+
+```
+
+### Hedging Sensitivity
+
+While finding the most optimal hedging portfolio for a target VAR is an important find in the optimization process, perhaps the most instructive finding is rather the sensitivity of the portfolio to increases in hedging dollars.
+
+Understanding the sensitivity of the VAR to dollars invested in hedging is what allows the company to measure the usefulness of it's hedging strategy, and ascertain the effectiveness of invested hedge dollars.
+
+#### Regression Analysis
+
+To ascertain the hedging effectiveness we'll use a simple linear regression model to analyze the reduction in VAR as hedging dollars increase. The model will be run on a total of 320 optimized VAR portfolios, across four different optimization scenarios with VAR 95\$ confidence targets of .1.5%, 2%, 3% and 4% of forecast VAR as percentage of baseline uhedged revenue.
+
+The regression formula is shown below:
+
+$\text{ValueAtRisk}_i = \beta_0 + \beta_1 \cdot \text{MeanDollarHedgingCost}_i + \varepsilon_i$
+
+```{r}
+
+# Calculate Regression
+hedge_regression <- optimized_sims |> 
+  lm(formula = opt_total_var ~ opt_total_hedge_cost_mean, data = _)
+
+```
+
+##### Regression Scatter Plot
+
+```{r regression_scatter_plot}
+#| echo: false
+#| warning: false
+
+optimized_sims |> 
+  ggplot(aes(x = opt_total_hedge_cost_mean  , y = opt_total_var)) +
+  geom_point(aes(color = factor(target_var))) +
+  xlab('Total Hedging Cost (Millions USD)') +
+  ylab('VAR 95%') + 
+  guides(color=guide_legend(title="VAR Target Pct Of Revenue")) +
+  theme(legend.position = 'bottom') +
+  geom_smooth(method = "lm", se = FALSE, color = 'red', linewidth = 1, alpha = .9) +
+  ggtitle('Sensitivity of VAR 95% to Hedging Cost')
+
+```
+
+##### Regression Results
+
+The regression model shows that for every \$1 million increase in hedging, the VAR 95% decreases by roughly \$9.5 million dollars.
+
+```{r regression_results_table}
+#| echo: false
+#| layout-nrow: 2
+
+# Show Model Results
+hedge_regression |> 
+  broom::tidy() |> 
+  mutate(p.value = round(p.value, 15)) |> 
+  gt::gt() |> 
+  gt::tab_header(title = 'Regression Results') |> 
+  gt::tab_options(table.align = 'left')  |> 
+  gt::text_replace(pattern = 'opt_total_hedge_cost_mean', replacement = 'Opt Total Hedge Cost')
+
+# Show Model Results
+hedge_regression |> 
+  broom::glance() |>
+  select(r.squared, adj.r.squared, sigma, statistic, p.value) |> 
+  mutate(p.value = round(p.value, 2)) |> 
+  gt::gt() |> 
+  gt::tab_header(title = 'Regression Accuracy')
+  
+```

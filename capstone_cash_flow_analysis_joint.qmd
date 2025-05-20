@@ -1,0 +1,580 @@
+---
+title: "Capstone - Simulated Cash Flow Analysis"
+author: "Brandon Dahl"
+format:
+   html:
+    theme: sandstone
+    embed-resources: true
+    toc: true
+    toc-depth: 4
+editor: visual
+---
+
+```{r import_libraries}
+#| include: false
+
+# Clear Variables
+rm(list = ls())
+
+# Import Data Wrangling
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(readxl)
+library(gt)
+
+# Import Financial Libraries
+library(quantmod)
+
+# Turn Off Scientific Notation
+options(scipen = 100)
+options(digits = 6)
+options(dplyr.summarise.inform = FALSE)
+
+# Markup on put option, roughly 5%
+# Add Revenue Distribution By Population (Excluding China)
+# Rates Goes Down = Dollar Weakens
+# Rate Goes Up = Dollar Strengthens
+
+```
+
+```{r import_data_params}
+#| include: false
+
+# Set Path
+excel_base_path <- 'C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/Capstone/project/regn_valuation.xlsx'
+
+```
+
+```{r import_data_financial_data}
+#| include: false
+
+# Import Historical Revenue
+hist_revenue <- readxl::read_excel(path = excel_base_path,
+                                   sheet = 'Income_Statement',
+                                   range = 'C6:H7')
+                                   
+# Import Revenue By Region
+hist_revenue_region <- readxl::read_excel(path = excel_base_path,
+                                          sheet = 'Revenue_Region',
+                                          range = 'B6:D12')
+
+# Import Growth Estimates
+growth_estimates <- readxl::read_excel(path = excel_base_path,
+                                       sheet = 'Growth_Estimates',
+                                       range = 'B4:H14')
+
+```
+
+```{r import_exchange_rate_paths}
+#| include: false
+
+# Import Exchange Rate Paths
+ex_paths <- readRDS(file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+                                  'Capstone/project/modeling/correlated_simulated_exchange_paths.rds'))
+
+# Import Last Exchange Rate
+current_exchange_rates <- getFX(c('USD/EUR',
+                                  'USD/JPY',
+                                  'USD/CNY',
+                                  'USD/AUD',
+                                  'USD/CAD',
+                                  'USD/GBP'),
+                                from=Sys.Date()-5,
+                                to = Sys.Date(), 
+                                auto.assign = TRUE)
+
+
+```
+
+```{r clean_current_exchange_rates}
+#| include: false
+
+# Create Joint Current Exchange Rates
+current_exchange_rates <- xts::merge.xts(x = USDEUR,
+                                         y = USDJPY) |> 
+  xts::merge.xts(x = _,
+                  y = USDGBP) |> 
+  xts::merge.xts(x = _,
+                 y = USDAUD) |> 
+  xts::merge.xts(x = _,
+                 y = USDCAD) |> 
+  xts::merge.xts(x = _,
+                 y = USDCNY) |> 
+  as.data.frame() |> 
+  tibble::rownames_to_column() |> 
+  rename(date = rowname) |> 
+  mutate(date = as.Date(date)) |> 
+  pivot_longer(cols = !starts_with('date'), names_to = 'country', values_to = 'exchange_rate') |> 
+  drop_na(exchange_rate) |> 
+  mutate(country = gsub(pattern = 'USD.', replacement = '', x = country)) |> 
+  group_by(country) |> 
+  arrange(desc(date)) |>
+  slice(1L) |> 
+  ungroup() |> 
+  select(country, exchange_rate)
+
+
+```
+
+## Revenue
+
+Below are Regenerons historical revenue statistics, and forecast revenue taken from a consensus of financial analysts.
+
+```{r clean_revenue_data}
+#| include: false
+
+# Clean Growth Estimates
+growth_estimates_clean <- growth_estimates |> 
+  janitor::clean_names()
+
+# Clean Historical
+hist_revenue_clean <- hist_revenue |> 
+  pivot_longer(cols = everything(), names_to = 'year', values_to = 'revenue_actual') |> 
+  mutate(revenue_estimate = NA_real_,
+         year = as.double(year)) |> 
+  relocate(revenue_estimate, .before = revenue_actual) |> 
+  arrange(year)
+
+# Create Joint Revenue
+joint_revenue <- growth_estimates_clean |> 
+  select(year, revenue_estimate) |>
+  mutate(revenue_actual = NA_real_) |> 
+  union(x = _, y = hist_revenue_clean) |> 
+  mutate(revenue_actual = revenue_actual/1000)
+
+# Clean Revenue Region
+hist_revenue_region_clean <- hist_revenue_region |> 
+  janitor::clean_names() |> 
+  mutate(us_pct = us/(us+row),
+         row_pct = row/(us+row))
+
+```
+
+### Revenue Historical & Forecast
+
+```{r plot_revenue_hist_forecast}
+#| echo: false
+#| warning: false
+
+joint_revenue |> 
+  mutate(revenue_actual = if_else(is.na(revenue_actual), revenue_estimate, revenue_actual)) |> 
+  pivot_longer(cols = !starts_with('year')) |> 
+  ggplot(aes(x = year, y = value, color = name)) +
+  geom_line() +
+  ggtitle('Regeneron Revenue Actual & Forecast') +
+  ylab('Gross Revenue (Millions USD)') +
+  xlab(element_blank()) +
+  theme(legend.position = 'bottom')
+
+```
+
+### Revenue By Region
+
+```{r table_revenue_by_region}
+#| echo: false
+
+hist_revenue_region_clean |> 
+  gt::gt() |> 
+  gt::tab_options(table.align = 'left') |> 
+  gt::tab_header('Regeneron - Revenue By Region') |> 
+  gt::fmt_number(columns = c(us,row), decimals = 0) |> 
+  gt::fmt_percent(columns = contains('pct')) |> 
+  gt::cols_label(us = 'US',
+                 row = 'International',
+                 us_pct = 'US',
+                 row_pct = 'International',
+                 date = 'Year') |> 
+  gt::tab_spanner(label = 'Gross Revenue', columns = c(us,row)) |> 
+  gt::tab_spanner(label = 'Percentages', columns = contains('pct'))
+
+```
+
+## Analyze Cash Flow Impacts
+
+Regeneron has noted the following in their 2024 10K:
+
+*Our revenue from outside the United States will increase as our products, whether marketed or otherwise commercialized by us or our collaborators, gainmarketing approval in such jurisdictions. Our primary foreign currency exposure relates to movements in the Japanese yen, euro, British pound sterling,Canadian dollar, Chinese yuan, and Australian dollar.*
+
+Source: Form 10K, Other Risk Related To Our Business
+
+As such, we'll analyze the impacts to forecast future cash flows based upon exposure to the following currencies:
+
+| Currency          | Symbol |
+|-------------------|--------|
+| Japanese Yen      | JPY    |
+| Euro              | EUR    |
+| British Pound     | GBP    |
+| Canadian Dollar   | CAD    |
+| Chinese Yuan      | CYN    |
+| Australian Dollar | AUD    |
+
+: Foreign Currencies
+
+```{r analyze_cash_flow_settings}
+
+# Set Cash Flow Percentages
+cash_percentages <- data.frame('rev_pct_aud' = 1/10,
+                               'rev_pct_cad' = 1/10,
+                               'rev_pct_cny' = 1/10,
+                               'rev_pct_eur' = 4/10,
+                               'rev_pct_gbp' = 2/10,
+                               'rev_pct_jpy' = 1/10)
+
+# Get International Revenue
+int_revenue <- subset(hist_revenue_region_clean, date == 2024, select = row_pct) |> pull()
+
+```
+
+```{r}
+
+# Setup Cash Flow Calculations
+cash_flow_setup <- ex_paths |> 
+  janitor::clean_names() |> 
+  # UPdate Names
+  {\(.)
+      rename_with(., ~ paste0('simulated_rate_', .x, recycle0 = TRUE), !contains(c('days','sim')))}() |> 
+  # Add Current Exchange Rate
+  cross_join(x = _ , y = current_exchange_rates |>
+              pivot_wider(names_from = country,
+                          values_from = exchange_rate,
+                          names_prefix = 'exchange_rate_current_') |> 
+               janitor::clean_names()) |> 
+  # Add Country Revenue Percentage
+  cross_join(x = _, y = cash_percentages) |> 
+  # Add Forecast Company Revenue
+  mutate(forecast_gross_revenue_int = (subset(growth_estimates_clean, year == 2025, select = revenue_estimate) |> 
+                                         pull())*1000*int_revenue) |> 
+  # Calculate Country Revenue Total (USD)
+  mutate(rev_current_aud = forecast_gross_revenue_int*rev_pct_aud, 
+         rev_current_cad = forecast_gross_revenue_int*rev_pct_cad, 
+         rev_current_cny = forecast_gross_revenue_int*rev_pct_cny, 
+         rev_current_eur = forecast_gross_revenue_int*rev_pct_eur, 
+         rev_current_gbp = forecast_gross_revenue_int*rev_pct_gbp, 
+         rev_current_jpy = forecast_gross_revenue_int*rev_pct_jpy) |> 
+  # Calculate Daily Country Revenue (USD)
+  mutate(rev_current_daily_aud = rev_current_aud/252,
+         rev_current_daily_cad = rev_current_cad/252,
+         rev_current_daily_cny = rev_current_cny/252,
+         rev_current_daily_eur = rev_current_eur/252,
+         rev_current_daily_gbp = rev_current_gbp/252,
+         rev_current_daily_jpy = rev_current_jpy/252) |> 
+  # Calculate Daily Revenue Converted 
+  mutate(rev_current_daily_sim_aud = (rev_current_daily_aud*exchange_rate_current_aud)/simulated_rate_aud,
+         rev_current_daily_sim_cad = (rev_current_daily_cad*exchange_rate_current_cad)/simulated_rate_cad,
+         rev_current_daily_sim_cny = (rev_current_daily_cny*exchange_rate_current_cny)/simulated_rate_cny,
+         rev_current_daily_sim_eur = (rev_current_daily_eur*exchange_rate_current_eur)/simulated_rate_eur,
+         rev_current_daily_sim_gbp = (rev_current_daily_gbp*exchange_rate_current_gbp)/simulated_rate_gbp,
+         rev_current_daily_sim_jpy = (rev_current_daily_jpy*exchange_rate_current_jpy)/simulated_rate_jpy) |> 
+  # Calculate Total Cash
+  mutate(rev_total_current = rev_current_daily_aud + rev_current_daily_cad + 
+           rev_current_daily_cny + rev_current_daily_eur + 
+           rev_current_daily_gbp + rev_current_daily_jpy,
+         rev_total_current_sim = rev_current_daily_sim_aud + rev_current_daily_sim_cad +
+           rev_current_daily_sim_cny + rev_current_daily_sim_eur + 
+           rev_current_daily_sim_gbp + rev_current_daily_sim_jpy) |> 
+  # Reorder
+  arrange(sim, days)
+
+```
+
+```{r calc_cash_flow_statistics}
+
+# Create Long Data To Calculate Statistics
+cash_flow_setup_long <- cash_flow_setup |> 
+  select(-c(rev_total_current, rev_total_current_sim)) |> 
+  pivot_longer(cols = !c('days','sim')) |> 
+  mutate(country = stringr::str_sub(str = name, start = -3, -1),
+         name = stringr::str_replace(string = name, pattern = paste0('_',country), replacement = '')) |> 
+  select(days, sim, country, name, value) |> 
+  arrange(country, sim, days, name) |> 
+  pivot_wider(names_from = name, values_from = value) |> 
+  filter(country != 'int')
+
+# Calculate Simulation Results
+cash_flow_results_sim <- cash_flow_setup_long |> 
+  # Group By Currency and Simulation Number
+  group_by(country, sim) |> 
+  # Calculate Grouped Statistics
+  summarise(exchange_rate_current_mean = mean(exchange_rate_current, na.rm = TRUE),
+            exchange_rate_simulated_mean = mean(simulated_rate, na.rm = TRUE), 
+            rev_current = mean(rev_current, na.rm = TRUE),
+            rev_sim = sum(rev_current_daily_sim, na.rm = TRUE)) |> 
+  ungroup() |> 
+  arrange(country, sim)
+
+# Calculate Currency Statistics
+cash_flows_stats_currency <- cash_flow_results_sim |> 
+  # Calculate Higher/Lower Than Forecast
+  mutate(higher_than_forecast = if_else(rev_sim > rev_current, 1, 0),
+         lower_than_forecast = if_else(rev_sim < rev_current, 1, 0)) |> 
+  group_by(country) |>
+  # Calculate Summary Currency Statistics
+  summarise(n_sim = n(),
+            # Exchange Rate Statistics
+            exchange_rate_sim_mean = mean(exchange_rate_simulated_mean, na.rm = TRUE),
+            exchange_rate_sim_max = max(exchange_rate_simulated_mean, na.rm = TRUE),
+            exchange_rate_sim_min = min(exchange_rate_simulated_mean, na.rm = TRUE),
+            exchange_rate_current = mean(exchange_rate_current_mean , na.rm = TRUE),
+            # Cash Flow Statistics
+            rev_sim_mean = mean(rev_sim, na.rm = TRUE),
+            rev_sim_max = max(rev_sim, na.rm = TRUE),
+            rev_sim_min = min(rev_sim, na.rm = TRUE),
+            rev_sim_sd = sd(rev_sim, na.rm = TRUE),
+            rev_sim_sd_pct = rev_sim_sd/rev_sim_mean,
+            rev_current = mean(rev_current, na.rm = TRUE),
+            # Higher/Lower Than Forecast
+            higher_than_forecast = sum(higher_than_forecast, na.rm = TRUE),
+            lower_than_forecast = sum(lower_than_forecast),
+            higher_than_forecast_pct = higher_than_forecast/n_sim,
+            lower_than_forecast_pct = lower_than_forecast/n_sim) |> 
+  ungroup()
+
+# Calculate Simulation Statistics
+cash_flow_stats_sim <- cash_flow_results_sim |> 
+  group_by(sim) |> 
+  summarise(rev_current = sum(rev_current, na.rm = TRUE),
+            rev_sim = sum(rev_sim)) |> 
+  ungroup()
+
+# Cash Flow Simulate Summary Stats
+cash_flow_stats_sim_sum <- cash_flow_stats_sim |>
+  summarise(rev_current = mean(rev_current, na.rm = TRUE),
+            rev_sim_mean = mean(rev_sim, na.rm = TRUE),
+            rev_sim_max = max(rev_sim, na.rm = TRUE),
+            rev_sim_min = min(rev_sim, na.rm = TRUE),
+            rev_sim_sd = sd(rev_sim, na.rm = TRUE),
+            rev_sim_var = rev_sim_mean - quantile(rev_sim, probs = .05),
+            rev_sim_var_pct = rev_sim_var/rev_current)
+            
+```
+
+### Simulation Table
+
+#### By Currency
+
+```{r simulation_table}
+#| echo: false
+
+cash_flows_stats_currency |> 
+  mutate(country = toupper(country)) |> 
+  gt::gt() |> 
+  gt::tab_spanner(label = 'Exchange Rate', columns = contains('exchange')) |> 
+  gt::tab_spanner(label = 'Total Revenue (USD', columns = contains('rev')) |> 
+  gt::tab_spanner(label = 'Comparison With Base Forecast', columns = contains('than')) |> 
+  # Relable Columns
+  gt::cols_label(country = 'Currency',
+                 n_sim = 'N Simulation',
+                 exchange_rate_sim_mean = 'Mean',
+                 exchange_rate_sim_max = 'Max',
+                 exchange_rate_sim_min = 'Min',
+                 exchange_rate_current = 'Current',
+                 rev_sim_mean = 'Mean',
+                 rev_sim_max = 'Max',
+                 rev_sim_min = 'Min',
+                 rev_sim_sd = 'SD',
+                 rev_sim_sd_pct = 'SD Pct',
+                 rev_current = 'Base Forecast',
+                 higher_than_forecast = 'Higher Than Forecast',
+                 lower_than_forecast = 'Lower Than Forecast',
+                 higher_than_forecast_pct = 'Higher Than Forecast Pct',
+                 lower_than_forecast_pct = 'Lower Than Forecast Pct') |> 
+  gt::tab_options(table.align = 'left',
+                  table.font.size = 10) |> 
+  # Format Data
+  gt::fmt_number(columns = contains('exchange'), decimals = 2) |> 
+  gt::fmt_currency(columns = contains('rev'), decimals = 0) |> 
+  gt::fmt_percent(columns = contains('pct'), decimals = 2) |> 
+  gt::tab_header(title = 'Cash Flow Simulation Results')
+
+```
+
+#### By Simulation
+
+```{r simulation_table_by_simn}
+#| echo: false
+
+# Create GT Table
+cash_flow_stats_sim_sum |> 
+  gt::gt() |> 
+  gt::tab_options(table.align = 'left',
+                  table.font.size = 10) |> 
+  gt::tab_header('Simulation Results') |> 
+  gt::tab_spanner(label = 'Base Forecast', columns = rev_current) |> 
+  gt::tab_spanner(label = 'Simulated Forecast', columns = !contains(c('current','var'))) |> 
+  gt::tab_spanner(label = 'Simulated VAR', columns = contains('var')) |> 
+  gt::cols_label(rev_current = 'Total Revenue',
+                 rev_sim_mean = 'Mean',
+                 rev_sim_max = 'Max',
+                 rev_sim_min = 'Min',
+                 rev_sim_sd = 'SD',
+                 rev_sim_var = '95% VAR',
+                 rev_sim_var_pct = '95% VAR Pct') |> 
+  gt::fmt_currency(columns = !contains('pct'), decimals = 0) |> 
+  gt::fmt_percent(columns = contains('pct'), decimals = 2)
+  
+
+```
+
+### Simulation Plots
+
+#### By Currency
+
+```{r simulation_plots_by_currency}
+#| echo: false
+#| layout-ncol: 3
+#| layout-nrow: 3
+#| warning: false
+
+# Australian Dollar
+cash_flow_results_sim |> 
+  filter(country == 'aud') |> 
+  ggplot(aes(x = rev_sim)) + 
+  geom_histogram() +
+  geom_vline(xintercept = cash_flow_results_sim |>
+               filter(country == 'aud') |>
+               pull(rev_current) |>
+               mean(), 
+             color = 'red', linetype = 'dashed', lwd = 1) +
+  ggtitle('Simulated Revenue Distribution - Australian Dollar') +
+  theme(text = element_text(size = 18)) + 
+  xlab('Revenue Millions USD')
+
+# Canadian Dollar
+cash_flow_results_sim |> 
+  filter(country == 'cad') |> 
+  ggplot(aes(x = rev_sim)) + 
+  geom_histogram() +
+  geom_vline(xintercept = cash_flow_results_sim |>
+               filter(country == 'cad') |>
+               pull(rev_current) |>
+               mean(), 
+             color = 'red', linetype = 'dashed', lwd = 1) +
+  ggtitle('Simulated Revenue Distribution - Canadian Dollar') +
+  theme(text = element_text(size = 18)) + 
+  xlab('Revenue Millions USD')
+
+# Chinese Yuan
+cash_flow_results_sim |> 
+  filter(country == 'cny') |> 
+  ggplot(aes(x = rev_sim)) + 
+  geom_histogram() +
+  geom_vline(xintercept = cash_flow_results_sim |>
+               filter(country == 'cny') |>
+               pull(rev_current) |>
+               mean(), 
+             color = 'red', linetype = 'dashed', lwd = 1) +
+  ggtitle('Simulated Revenue Distribution - Chinese Yuan') +
+  theme(text = element_text(size = 18)) + 
+  xlab('Revenue Millions USD')
+
+# Euro
+cash_flow_results_sim |> 
+  filter(country == 'eur') |> 
+  ggplot(aes(x = rev_sim)) + 
+  geom_histogram() +
+  geom_vline(xintercept = cash_flow_results_sim |>
+               filter(country == 'eur') |>
+               pull(rev_current) |>
+               mean(), 
+             color = 'red', linetype = 'dashed', lwd = 1) +
+  ggtitle('Simulated Revenue Distribution - Euro') +
+  theme(text = element_text(size = 18)) + 
+  xlab('Revenue Millions USD')
+
+# British Pound
+cash_flow_results_sim |> 
+  filter(country == 'gbp') |> 
+  ggplot(aes(x = rev_sim)) + 
+  geom_histogram() +
+  geom_vline(xintercept = cash_flow_results_sim |>
+               filter(country == 'gbp') |>
+               pull(rev_current) |>
+               mean(), 
+             color = 'red', linetype = 'dashed', lwd = 1) +
+  ggtitle('Simulated Revenue Distribution - British Pound') +
+  theme(text = element_text(size = 18)) + 
+  xlab('Revenue Millions USD')
+
+# Japanese Yen
+cash_flow_results_sim |> 
+  filter(country == 'jpy') |> 
+  ggplot(aes(x = rev_sim)) + 
+  geom_histogram() +
+  geom_vline(xintercept = cash_flow_results_sim |>
+               filter(country == 'jpy') |>
+               pull(rev_current) |>
+               mean(), 
+             color = 'red', linetype = 'dashed', lwd = 1) +
+  ggtitle('Simulated Revenue Distribution - Japanese Yen') +
+  theme(text = element_text(size = 18)) + 
+  xlab('Revenue Millions USD')
+
+```
+
+#### By Simulation
+
+```{r}
+#| echo: false
+
+cash_flow_stats_sim |> 
+  mutate(category = 'Simulation') |> 
+  union(x = _, y = cash_flow_stats_sim |>
+          mutate(category = 'VAR') |>
+          filter(rev_sim <= quantile(cash_flow_stats_sim$rev_sim, probs = .05),
+                 category == 'VAR')) |>
+  ggplot(aes(x = rev_sim, fill = category)) +
+  geom_histogram(alpha = .5, bins = 50, position = 'identity') +
+  geom_vline(xintercept = cash_flow_stats_sim |>
+               pull(rev_current) |>
+               mean(),
+             color = 'red', linetype = 'dashed', lwd = 1) +
+  ggtitle(label = 'Simulated Revenue Forecast with 95% VAR') +
+  xlab(label = 'Revenue (USD)') +
+  theme(legend.position = 'bottom', legend.title = element_blank())
+  
+```
+
+### Forecast Revenue
+
+```{r create_forecast_revenue_plot}
+#| echo: false
+#| warning: false
+
+# Calculate Percentage SD
+revenue_bounds <- cash_flow_stats_sim_sum |> 
+  mutate(percent_bound = (rev_sim_sd*1.96)/rev_sim_mean) |> 
+  pull(percent_bound)
+
+# Calculate Revenue Bounds
+joint_revenue |> 
+  arrange(year) |> 
+  mutate(revenue_actual = if_else(is.na(revenue_actual), revenue_estimate, revenue_actual)) |> 
+  mutate(us_revenue = revenue_estimate*(1 - int_revenue),
+         int_revenue = revenue_estimate*int_revenue,
+         int_revenue_ub = int_revenue*(1 + revenue_bounds),
+         int_revenue_lb = int_revenue*(1 - revenue_bounds),
+         revenue_estimte_ub = us_revenue + int_revenue_ub,
+         revenue_estimate_lb = us_revenue + int_revenue_lb) |> 
+  select(year, revenue_actual, revenue_estimate, revenue_estimte_ub, revenue_estimate_lb) |> 
+  pivot_longer(cols = c(revenue_actual, revenue_estimate), names_to = 'category', values_to = 'revenue') |> 
+  ggplot(aes(x = year, y = revenue, color = category)) +
+  geom_line() +
+  geom_ribbon(aes(ymax = revenue_estimte_ub, ymin = revenue_estimate_lb), color = 'grey', alpha = .5) +
+  ggtitle(label = 'Forecast Revenue With Currency Risk') +
+  theme(legend.position = 'bottom') +
+  ylab('Revenue (Millions USD)')
+  
+```
+
+```{r export_data}
+#| include: false
+
+# Export Cash Flow Setup
+cash_flow_setup |>
+  saveRDS(object = _,
+          file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+                                  'Capstone/project/modeling/correlated_cash_flow_setup.rds'))
+
+```

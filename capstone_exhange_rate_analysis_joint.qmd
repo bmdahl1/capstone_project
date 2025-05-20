@@ -1,0 +1,966 @@
+---
+title: "Capstone - Exchange Rate Analysis"
+author: "Brandon Dahl"
+format:
+   html:
+    code-overflow: wrap
+    theme: sandstone
+    embed-resources: true
+    toc: true
+    toc-depth: 4
+editor: visual
+---
+
+```{r import_libraries}
+#| include: false
+
+# Clear Variables
+rm(list = ls())
+
+# Import Data Wrangling
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+
+# Turn Off Scientific Notation
+options(scipen = 100)
+options(digits = 6)
+
+```
+
+## Import Exchange Rates
+
+All exchange rates were obtained from FRED, the Federal Reserve of St. Louis Economic Data database.
+
+Exchange rates were downloaded for the following currencies:
+
+-   Japan Yen to USD
+
+-   USD to Euro
+
+-   US to British Pound
+
+-   USD to Australian Dollar
+
+-   Canadian Dollar to USD
+
+-   Chinese Yuan to UDS
+
+All data will be converted as needed to Foreign Currency to USD for consistency in data analysis.
+
+[Source: Federal Reserve Bank of St. Louis](https://fred.stlouisfed.org/release?rid=17)
+
+```{r set_exchange_params}
+#| include: false
+
+# Set Base Path
+ex_path <- 'C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/Capstone/project/financials/exchange_rate_csv/'
+
+# Set Data
+start_date <- Sys.Date() - lubridate::years(25)
+
+```
+
+```{r import_historical_exchange}
+#| include: false
+
+# Import Japan to USD Conversion
+exchange.jpy_to_usd <- read.csv(file = paste0(ex_path,'jpy_to_usd.csv'))
+
+# Import Euro to USD Conversion
+exchange.eur_to_usd <- read.csv(file = paste0(ex_path,'eur_to_usd.csv'))
+
+# Import GBP to USD Conversion
+exchange.gbp_to_usd <- read.csv(file = paste0(ex_path,'gbp_to_usd.csv'))
+
+# Import CAD to USD Conversion
+exchange.cad_to_usd <- read.csv(file = paste0(ex_path,'cad_to_usd.csv'))
+
+# Import AUS to USD Conversion
+exchange.aud_to_usd <- read.csv(file = paste0(ex_path,'aud_to_usd.csv'))
+
+# Import CNY to USD Conversion
+exchange.cny_to_usd <- read.csv(file = paste0(ex_path,'cny_to_usd.csv'))
+
+```
+
+```{r clean_exchange_rates}
+#| include: true
+
+# Clean Japan to US Exchange Data
+exchange.jpy_to_usd_clean <- exchange.jpy_to_usd |> 
+  rename(date = observation_date,
+         JPY = DEXJPUS) |>
+  # Fix Dates & Interpolate Missing Data
+  mutate(date = as.Date(date),
+         JPY = zoo::na.approx(JPY)) |> 
+  # Filter To Last 25 Years
+  filter(date >= start_date) |> 
+  arrange(date)
+
+# Clean Euro to US Exchange Data
+exchange.eur_to_usd_clean <- exchange.eur_to_usd |> 
+  rename(date = observation_date,
+         EUR = DEXUSEU) |>
+  # Fix Dates & Interpolate Missing Data
+  mutate(date = as.Date(date),
+         EUR = zoo::na.approx(EUR),
+         EUR = 1/EUR) |> 
+  # Filter To Last 25 Years
+  filter(date >= start_date) |> 
+  arrange(date)
+
+# Clean GBP to US Exchange Data
+exchange.gbp_to_usd_clean <- exchange.gbp_to_usd |> 
+  rename(date = observation_date,
+         GBP = DEXUSUK) |>
+  # Fix Dates & Interpolate Missing
+  mutate(date = as.Date(date),
+         GBP = zoo::na.approx(GBP),
+         GBP = 1/GBP) |> 
+  # Filter To Last 25 Years
+  filter(date >= start_date) |> 
+  arrange(date)
+  
+# Clean AUD to US Exchange Data
+exchange.aud_to_usd_clean <- exchange.aud_to_usd |> 
+  rename(date = observation_date,
+         AUD = DEXUSAL) |>
+  # Fix Dates & Interpolate Missing
+  mutate(date = as.Date(date),
+         AUD = zoo::na.approx(AUD),
+         AUD = 1/AUD) |> 
+  # Filter To Last 25 Years
+  filter(date >= start_date) |> 
+   arrange(date)
+   
+# Clean CAD to US Exchange Data
+exchange.cad_to_usd_clean <- exchange.cad_to_usd |> 
+  rename(date = observation_date,
+         CAD = DEXCAUS) |>
+  # Fix Dates & Interpolate Missing
+  mutate(date = as.Date(date),
+         CAD = zoo::na.approx(CAD)) |> 
+  # Filter To Last 25 Years
+  filter(date >= start_date) |> 
+  arrange(date)
+   
+# Clean CNY to US Exchange Data
+exchange.cny_to_usd_clean <- exchange.cny_to_usd |> 
+  rename(date = observation_date,
+         CNY = DEXCHUS) |>
+  # Fix Dates & Interpolate Missing
+  mutate(date = as.Date(date),
+         CNY = zoo::na.approx(CNY)) |> 
+  # Filter To Last 25 Years
+  filter(date >= start_date) |> 
+   arrange(date)
+   
+# Create Joint Exchane Data
+exchange_df <- exchange.jpy_to_usd_clean |> 
+  left_join(x = _, y = exchange.eur_to_usd_clean, by = 'date') |> 
+  left_join(x = _, y = exchange.aud_to_usd_clean, by = 'date') |>
+  left_join(x = _, y = exchange.gbp_to_usd_clean, by = 'date') |>
+  left_join(x = _, y = exchange.cad_to_usd_clean, by = 'date') |>
+  left_join(x = _, y = exchange.cny_to_usd_clean, by = 'date') |> 
+  arrange(date)
+
+# Clear Original Data
+rm(exchange.aud_to_usd, exchange.cad_to_usd, exchange.eur_to_usd, 
+   exchange.jpy_to_usd, exchange.gbp_to_usd, exchange.cny_to_usd)
+
+```
+
+### Exchange Rate Plots
+
+Below is 25-years of historical exchange rates. The Japan/China exchange rates have been scaled to fit into one plot with the western currencies.
+
+You can also see in the plot that the Chinese Yuan was pegged to the U.S. Dollar until roughly 2005.
+
+```{r exchange_rate_plots_v1}
+#| echo: false
+
+# Create GGPlot
+temp_plot <- exchange_df |> 
+  mutate(JPY = JPY/100,
+         CNY = CNY/6) |> 
+  rename(`JPY/100` = JPY,
+         `CNY/6` = CNY) |> 
+  pivot_longer(cols = !starts_with('date'), names_to = 'CURRENCY', values_to = 'rate') |> 
+  ggplot(aes(x = date, y = rate, color = CURRENCY)) +
+  geom_line() +
+  xlab(element_blank()) +
+  ylab('Exchange Rate') +
+  ggtitle(label = 'Foreign Currency Exhange Rate to USD - 25 Year History')
+
+# Show PLot
+temp_plot
+
+```
+
+## Analyze Exchange Rates
+
+Our analysis of the exchange rates will seek to find
+
+-   Historical Daily Log Returns
+
+-   Historical Daily Volatility
+
+-   Historical Annualized Volatility
+
+-   Correlation Between Currencies Daily Returns
+
+### Measure Volatility
+
+```{r measure_return_volatility}
+
+# Calculate Daily Log Returns
+daily_returns <- exchange_df |>
+    pivot_longer(cols = !starts_with('date'), names_to = 'currency', values_to = 'rate') |>
+    arrange(currency, date) |>
+    group_by(currency) |>
+    mutate(daily_return = log(rate) - log(lag(rate, n = 1))) |> 
+    ungroup() |>
+    drop_na(daily_return)
+  
+# Calculate Daily Volatility
+daily_volatility <- daily_returns |> 
+    group_by(currency) |> 
+    summarise(daily_volatility = sd(daily_return, na.rm = TRUE)) |> 
+    ungroup()
+    
+# Convert To Annualize Volatility
+annual_volatility <- daily_volatility |> 
+  mutate(annual_volatility = daily_volatility*sqrt(252))
+
+```
+
+```{r volatility_table}
+#| echo: false
+
+# Create Volatility table
+annual_volatility |> 
+  gt::gt() |> 
+  gt::cols_label(daily_volatility = 'Daily Volatility',
+                 annual_volatility = 'Annualized Volatility',
+                 currency = 'Currency') |>
+  gt::tab_header(title = 'Currency to USD Volatility') |> 
+  gt::fmt_percent(columns = contains('volatility')) |> 
+  gt::tab_options(table.align = 'left')
+  
+```
+
+### Correlation
+
+The correlation matrix constructed in this analysis will be used to compute the correlated price patterns later using Geometric Brownian Motion.
+
+As we can see from the correlation matrix and plots, the Western currencies (AUD, CAD, EUR, GBP) tend to be highly correlated with each other in their movements against the U.S. Dollar, while the Asian currencies exhibit very little correlation.
+
+```{r analysis_correlation}
+
+# Create Correlation Matrix
+daily_return_matrix <- daily_returns |>
+  select(date, currency, daily_return) |> 
+  pivot_wider(names_from = currency, values_from = daily_return) |> 
+  select(-date) |> 
+  cor()
+
+```
+
+```{r analysis_correlation_table}
+#| echo: false
+
+# Compute Correlation Matrix
+daily_return_matrix |> 
+  as.data.frame() |> 
+  gt::gt(rownames_to_stub = TRUE) |> 
+  gt::tab_options(table.align = 'left') |> 
+  gt::tab_header(title = 'Correlation Matrix') |> 
+  gt::fmt_number(decimals = 4)
+
+```
+
+```{r}
+#| echo: false
+#| layout-ncol: 2
+#| layout-nrow: 2
+
+# Plot AUD vs. Euro
+plot(x = daily_returns[daily_returns$currency=='EUR','daily_return'][[1]],
+     y = daily_returns[daily_returns$currency=='AUD','daily_return'][[1]],
+     main = 'Euro vs. Australian Dollar',
+     xlab = 'Euro',
+     ylab = 'Australian Dollar')
+abline(lm(daily_returns[daily_returns$currency=='EUR','daily_return'][[1]]~
+           daily_returns[daily_returns$currency=='AUD','daily_return'][[1]]),
+       col = 'red', lty = 'dashed')
+
+# Plot CAD vs. Euro
+plot(x = daily_returns[daily_returns$currency=='EUR','daily_return'][[1]],
+     y = daily_returns[daily_returns$currency=='CAD','daily_return'][[1]],
+     main = 'Euro vs. Canadian Dollar',
+     xlab = 'Euro',
+     ylab = 'Canadian Dollar')
+abline(lm(daily_returns[daily_returns$currency=='EUR','daily_return'][[1]]~
+           daily_returns[daily_returns$currency=='CAD','daily_return'][[1]]),
+       col = 'red', lty = 'dashed')
+
+# Plot CAD vs. Euro
+plot(x = daily_returns[daily_returns$currency=='EUR','daily_return'][[1]],
+     y = daily_returns[daily_returns$currency=='GBP','daily_return'][[1]],
+     main = 'Euro vs. British Pound',
+     xlab = 'Euro',
+     ylab = 'British Pound')
+abline(lm(daily_returns[daily_returns$currency=='EUR','daily_return'][[1]]~
+           daily_returns[daily_returns$currency=='GBP','daily_return'][[1]]),
+       col = 'red', lty = 'dashed')
+
+# Plot JPY vs. Euro
+plot(x = daily_returns[daily_returns$currency=='EUR','daily_return'][[1]],
+     y = daily_returns[daily_returns$currency=='JPY','daily_return'][[1]],
+     main = 'Euro vs. Japanese Yen',
+     xlab = 'Euro',
+     ylab = 'Japanese Yen')
+abline(lm(daily_returns[daily_returns$currency=='EUR','daily_return'][[1]]~
+           daily_returns[daily_returns$currency=='JPY','daily_return'][[1]]),
+       col = 'red', lty = 'dashed')
+
+```
+
+### Daily Return Distribution
+
+Theoretically returns should be from a normal distribution to use Geometric Brownian Motion. We can see below that the returns are not normal, but for a simplistic model we'll use GBM as has been done in several studies modeling exchange rates.
+
+```{r daily_return_histogram}
+#| echo: false
+#| layout-ncol: 3
+#| layout-nrow: 3
+
+# Create Daily Return Histogram EUR
+subset(daily_returns, currency == 'EUR', select = daily_return) |> pull() |> 
+  hist(main = 'EUR Daily Returns', xlab = '')
+
+# Create Daily Return Histogram JPY
+subset(daily_returns, currency == 'JPY', select = daily_return) |> pull() |> 
+  hist(main = 'JPY Daily Returns', xlab = '')
+
+# Create Daily Return Histogram GBP
+subset(daily_returns, currency == 'GBP', select = daily_return) |> pull() |> 
+  hist(main = 'GBP Daily Returns', xlab = '')
+
+# Create Daily Return Histogram AUD
+subset(daily_returns, currency == 'AUD', select = daily_return) |> pull() |> 
+  hist(main = 'AUD Daily Returns', xlab = '')
+
+# Create Daily Return Histogram CAD
+subset(daily_returns, currency == 'CAD', select = daily_return) |> pull() |> 
+  hist(main = 'CAD Daily Returns', xlab = '')
+
+# Create Daily Return Histogram CNY
+subset(daily_returns, currency == 'CNY', select = daily_return) |> pull() |> 
+  hist(main = 'CNY Daily Returns', xlab = '')
+
+```
+
+### Historical Paths
+
+Below we'll examine 25-years of historical price paths to serve as a baseline indicator of how volatile exchange rates have been historically.
+
+This will serve as a useful benchmark when we forecast possible exchange rate paths using GBM.
+
+```{r}
+
+# Calculate Historical Paths Wide
+hist_paths <- exchange_df |> 
+  mutate(YEAR = lubridate::year(date)) |> 
+  group_by(YEAR) |> 
+  arrange(date) |> 
+  mutate(INDEX = row_number()) |> 
+  ungroup() |> 
+  arrange(YEAR, INDEX) |> 
+  pivot_longer(cols = c('JPY','EUR','AUD','GBP','CAD','CNY'), names_to = 'COUNTRY', values_to = 'RATE') |> 
+  select(-c(date)) |> 
+  pivot_wider(names_from = YEAR, values_from = RATE) |> 
+  arrange(COUNTRY, INDEX)
+
+# Create Country Paths Long
+hist_paths_long <- exchange_df |> 
+  mutate(YEAR = lubridate::year(date)) |> 
+  group_by(YEAR) |> 
+  arrange(date) |> 
+  mutate(INDEX = row_number()) |> 
+  ungroup() |> 
+  arrange(YEAR, INDEX) |> 
+  pivot_longer(cols = c('JPY','EUR','AUD','GBP','CAD','CNY'), names_to = 'COUNTRY', values_to = 'RATE') |> 
+  select(-c(date)) |> 
+  arrange(COUNTRY, YEAR, INDEX)
+
+# Create Adjusted Country Paths
+hist_paths_adj <- hist_paths_long |> 
+  group_by(YEAR, COUNTRY) |> 
+  mutate(STARTING_RATE = first(RATE)) |> 
+  ungroup() |> 
+  mutate(RATE = RATE - STARTING_RATE)
+
+# Create Adjusted Percentage Paths
+hist_paths_pct <- hist_paths_long |> 
+  group_by(YEAR, COUNTRY) |> 
+  mutate(STARTING_RATE = first(RATE)) |> 
+  ungroup() |> 
+  mutate(RATE = (RATE - STARTING_RATE)/STARTING_RATE)
+
+# Calculate Summary States
+hist_path_stats <- hist_paths_pct |> 
+  group_by(YEAR, COUNTRY) |> 
+  filter(INDEX == max(INDEX)) |> 
+  ungroup() |> 
+  # Calculate Rankings
+  group_by(COUNTRY) |>
+  arrange(RATE) |> 
+  mutate(RANK = row_number()) |> 
+  ungroup() |> 
+  mutate(BOTTOM_25 = if_else(RANK <= 6, RATE, NA_real_),
+         TOP_25 = if_else(RANK >= 19, RATE, NA_real_ )) |> 
+  arrange(COUNTRY) |> 
+  group_by(COUNTRY) |> 
+  summarise(MIN = min(RATE, na.rm = TRUE),
+            MAX = max(RATE, na.rm = TRUE),
+            AVG = mean(RATE, na.rm = TRUE),
+            MIN_25TH = mean(BOTTOM_25, na.rm = TRUE),
+            TOP_25TH = mean(TOP_25, na.rm = TRUE)) |> 
+  ungroup()
+
+```
+
+#### Plots
+
+```{r plots_historical_paths}
+#| include: false
+
+# Create Japan Path Plot
+jpy_path_plot <- hist_paths_pct |>
+  filter(COUNTRY == 'JPY') |> 
+  ggplot(aes(x = INDEX, y = RATE, color = as.factor(YEAR))) +
+  geom_line() +
+  theme(legend.position = 'None') +
+  geom_hline(yintercept = 0) +
+  xlab('Day Of Year') +
+  ylab('Exchange Rate Percent Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle(label = 'JPY 25-Year Historical Rate Paths')
+
+# Create Euro Path Plot
+eur_path_plot <- hist_paths_pct |>
+  filter(COUNTRY == 'EUR') |> 
+  ggplot(aes(x = INDEX, y = RATE, color = as.factor(YEAR))) +
+  geom_line() +
+  theme(legend.position = 'None') +
+  geom_hline(yintercept = 0) +
+  xlab('Day Of Year') +
+  ylab('Exchange Rate Percent  Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle(label = 'EUR 25-Year Historical Rate Paths')
+
+# Create GBP Path Plot
+gbp_path_plot <- hist_paths_pct |>
+  filter(COUNTRY == 'GBP') |> 
+  ggplot(aes(x = INDEX, y = RATE, color = as.factor(YEAR))) +
+  geom_line() +
+  theme(legend.position = 'None') +
+  geom_hline(yintercept = 0) +
+  xlab('Day Of Year') +
+  ylab('Exchange Rate Percent Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle(label = 'GBP 25-Year Historical Rate Paths')
+
+# Create CAD Path Plot
+cad_path_plot <- hist_paths_pct |>
+  filter(COUNTRY == 'CAD') |> 
+  ggplot(aes(x = INDEX, y = RATE, color = as.factor(YEAR))) +
+  geom_line() +
+  theme(legend.position = 'None') +
+  geom_hline(yintercept = 0) +
+  xlab('Day Of Year') +
+  ylab('Exchange Rate Percent Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle(label = 'CAD 25-Year Historical Rate Paths')
+
+# Create AUD Path Plot
+aud_path_plot <- hist_paths_pct |>
+  filter(COUNTRY == 'AUD') |> 
+  ggplot(aes(x = INDEX, y = RATE, color = as.factor(YEAR))) +
+  geom_line() +
+  theme(legend.position = 'None') +
+  geom_hline(yintercept = 0) +
+  xlab('Day Of Year') +
+  ylab('Exchange Rate Percent Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle(label = 'AUD 25-Year Historical Rate Paths')
+
+# Create CNY Path Plot
+cny_path_plot <- hist_paths_pct |>
+  filter(COUNTRY == 'CNY') |> 
+  ggplot(aes(x = INDEX, y = RATE, color = as.factor(YEAR))) +
+  geom_line() +
+  theme(legend.position = 'None') +
+  geom_hline(yintercept = 0) +
+  xlab('Day Of Year') +
+  ylab('Exchange Rate Percent Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle(label = 'CNY 25-Year Historical Rate Paths')
+
+```
+
+```{r output_plots_historical_paths_1}
+#| echo: false
+#| layout-ncol: 2
+
+# Create Plots
+aud_path_plot
+cad_path_plot
+
+```
+
+```{r output_plots_hist_path_2}
+#| echo: false
+#| layout-ncol: 2
+
+# Create Plots
+eur_path_plot
+gbp_path_plot
+
+```
+
+```{r output_plots_hist_paths_3}
+#| echo: false
+#| layout-ncol: 2
+
+# Create Plots
+cny_path_plot
+jpy_path_plot
+
+```
+
+#### Table
+
+```{r table_hist_paths}
+#| echo: false
+
+hist_path_stats |> 
+  gt::gt() |> 
+  gt::tab_header(title = 'Foreign Exchange Historical Paths Statistics') |> 
+  gt::cols_label(COUNTRY = 'Country',
+                 MIN = 'Min',
+                 MAX = 'Max',
+                 AVG = 'Avg',
+                 MIN_25TH = 'Min 25%',
+                 TOP_25TH = 'Top 25%') |> 
+  gt::fmt_percent(columns = !starts_with('COUNTRY')) |> 
+  gt::tab_options(table.align = 'left')
+
+```
+
+## Simulate Exchange Rate Paths
+
+Below we'll simulate the possible exchange rate paths for all six currencies using correlated Geometric Brownian Motion.
+
+The formula for Geometric Brownian Motion is shown below:'
+
+$S_t = S_0 * exp((\mu - \frac12\sigma^2)t+\sigma W_t)$
+
+term
+
+:   $S_t$ = Asset Price at Time $t$
+
+    $S_0$ = Initial Price of Asset
+
+    $\mu$ = Drift Term (growth rate of asset path)
+
+    $\sigma$ = Volatility
+
+    $W_t$ = Standard Brownian Motion, or random variable from standard normal distribution.
+
+    [Source: Correlated GBM Functions](#%20Source:%20https://github.com/bickez/puppy-economics/blob/master/gbm.R)
+
+### Assumptions
+
+For each country we'll use their historical daily volalitility as $\sigma$, and we'll assume a zero drift rate for all currencies. Financial theory dictates that the differences in each countries respective risk free rate vs. the domestic currency may be used as the drift rate to indicate the cost of holding the one currency compared to the other. For this analysis we won't be incorporating the risk free rates of return.
+
+```{r}
+#| include: false
+
+# Create Joint Dataset
+joint_data <- annual_volatility |> 
+  select(currency, daily_volatility) |> 
+  left_join(x = _, y = exchange_df |> 
+              filter(date == max(date)) |> 
+              select(-c(date)) |> 
+              pivot_longer(cols = everything()),
+            by = c('currency'='name')) |> 
+  rename(current_rate = value)
+
+```
+
+### GBM Functions
+
+```{r}
+
+GBM <- function(N, sigma, mu, S0, Wt = NULL) {
+  # Creates a single asset path of daily prices using Geometric Brownian Motion. 
+  # One year is 252 days since that is about how many trading days are in any
+  # given year.
+  #
+  # Args:
+  #   N: Number of days in the path.
+  #   sigma: Volatility or standard deviation of daily continuously compounded 
+  #          returns.
+  #   mu: Drift or average daily continuously compounded returns. 
+  #   S0: The initial price of the asset. 
+  #   Wt: The cumulative Brownian motion of the model. This can be supplied or 
+  #       left as NULL. In the case that it is NULL, a vector will be provided.
+  #       If you include this argument, it must be a vector of length N of the 
+  #       cumulative sum of a random variable to work properly. 
+  #
+  # Returns:
+  #   A vector of length N containing the asset prices generated by the specified
+  #   GBM. 
+  if (is.null(Wt)) {
+    Wt <- cumsum(rnorm(N, 0, 1))
+  }
+  t <- (1:N)/252
+  p1 <- (mu - 0.5*(sigma*sigma)) * t
+  p2 <- sigma * Wt
+  St = S0 * exp(p1 + p2)
+  return(St)
+}
+
+CorrelatedGBM <- function(N, S0, mu, sigma, cor.mat) {
+  # Creates a matrix of correlated daily price paths using Geometric 
+  # Brownian Motion. 
+  #
+  # Args: 
+  #   N: Number of days in the path.
+  #   mu: Drift or average daily continuously compounded returns.  
+  #   sigma: Volatility or standard deviation of daily continuously compounded 
+  #          returns. 
+  #   S0: The initial price of the asset. 
+  #   cor.mat: The correlation matrix of the daility contiuously compounded 
+  #            returns. 
+  #
+  # Returns:
+  #   A matrix of simulated daily price paths of length N having the same number
+  #   of assets as in the mu and sigma vectors. Note that mu and sigma must have
+  #   the same dimensions. 
+  mu <- as.matrix(mu)
+  sigma <- as.matrix(sigma)
+  GBMs <- matrix(nrow = N, ncol = nrow(mu))
+  Wt <- matrix(rnorm(N * nrow(mu), 0, 1), ncol = nrow(mu))
+  Wt <- apply(Wt, 2, cumsum)
+  chol.mat <- chol(cor.mat) # upper triangular cholesky decomposition
+  Wt <- Wt %*% chol.mat   # key trick for creating correlated paths
+  for (i in 1:nrow(mu)) {
+    GBMs[,i] <- GBM(N, sigma[i], mu[i] , S0[i], Wt[, i])
+  }
+  return(GBMs)
+}
+
+```
+
+### Compute Simulated GBM Paths
+
+```{r}
+
+# Parameters
+set.seed (1)
+hundreds <- 5
+sims <- 100*hundreds
+
+# Create Sim Path Aggregate
+sim_path_agg <- data.frame()
+
+# Create Simulated Exchange Rate Paths
+for (s in 1:sims){
+  
+  # Create Correlated Path
+  temp_corr_gbm <- CorrelatedGBM(N = 252,
+                                 S0 = joint_data$current_rate,
+                                 mu = rep(0,6),
+                                 sigma = joint_data$daily_volatility,
+                                 cor.mat = daily_return_matrix)
+  
+  # Clean Path Data
+  temp_corr_gbm_df <- temp_corr_gbm |> 
+    as.data.frame() |> 
+    rename(!!joint_data$currency[1] := V1,
+           !!joint_data$currency[2] := V2,
+           !!joint_data$currency[3] := V3,
+           !!joint_data$currency[4] := V4,
+           !!joint_data$currency[5] := V5,
+           !!joint_data$currency[6] := V6) |> 
+    mutate(sim = s,
+           days = row_number()) |> 
+    relocate(c(days,sim), .before = everything()) |> 
+    arrange(days)
+  
+  # Add To Aggregate
+  sim_path_agg <- rbind(sim_path_agg,
+                        temp_corr_gbm_df)
+  
+  # Kill Variablesa
+  rm(temp_corr_gbm_df,temp_corr_gbm)
+
+}
+
+```
+
+### Compute Simulated Correlation
+
+We'll want to confirm the correlation of daily log returns of the simulated paths are roughly similar to historical return correlation.
+
+```{r}
+
+# Compute Returns
+sim_path_agg_returns <- sim_path_agg |> 
+  group_by(sim) |> 
+  mutate(AUD_RETURNS = log(AUD) - log(lag(AUD, n = 1)),
+         CAD_RETURNS = log(CAD) - log(lag(CAD, n = 1)),
+         CNY_RETURNS = log(CNY) - log(lag(CNY, n = 1)),
+         EUR_RETURNS = log(EUR) - log(lag(EUR, n = 1)),
+         GBP_RETURNS = log(GBP) - log(lag(GBP, n = 1)),
+         JPY_RETURNS = log(JPY) - log(lag(JPY, n = 1))) |> 
+  ungroup() |> 
+  drop_na() |> 
+  select(days, sim, contains('RETURNS')) |> 
+  arrange(sim, days)
+
+# Calcualte Correlation
+sim_path_agg_returns_cor <- sim_path_agg_returns |>
+  select(contains('RETURNS')) |> 
+  cor()
+
+# Reset Rownames
+rownames(sim_path_agg_returns_cor) <- joint_data$currency
+
+```
+
+```{r}
+#| echo: false
+
+# Creat Table
+sim_path_agg_returns_cor |> 
+  as.data.frame() |> 
+  {\(.)
+      rename_with(., ~ gsub(pattern = '_RETURNS', replacement = '', .x), everything())}() |> 
+  gt::gt(rownames_to_stub = TRUE) |> 
+  gt::tab_header(title = 'Simulated Exchange Path Correlations') |> 
+  gt::tab_options(table.align = 'left') |> 
+  gt::fmt_number(decimals = 5)
+
+```
+
+### Analyze Exchange Rate Paths
+
+Below are the simulated GBM paths for each currency exchange rate. Included are historical yearly changes to serve as a comparison for actual changes.
+
+You can see that the majority of the simulated paths fit mostly within historical annual changes.
+
+```{r}
+#| include: false
+
+# Calculate Statistics
+ex_path_long <- sim_path_agg |> 
+  # Filter To Last Rate
+  group_by(sim) |> 
+  filter(days == max(days)) |> 
+  ungroup() |> 
+  pivot_longer(cols = !contains(c('days','sim')), names_to = 'country', values_to = 'final_rate') |> 
+  # Add Starting Rate
+  left_join(x = _, y = joint_data |> 
+              select(currency, current_rate),
+            by = c('country' = 'currency')) |> 
+  # Calculate Statistics
+  mutate(rate_change = (final_rate - current_rate)/current_rate) |> 
+  # Calculate Rankings
+  group_by(country) |> 
+  arrange(rate_change) |> 
+  mutate(rank = row_number()) |> 
+  ungroup() |> 
+  group_by(country) |> 
+  mutate(bottom_25 = if_else(rank <= 25*hundreds, rate_change, NA_real_),
+         top_25 = if_else(rank >= 75*hundreds, rate_change, NA_real_)) |> 
+  ungroup()
+
+# Calculate Statistics
+ex_paths_stats <- ex_path_long |> 
+  group_by(country) |> 
+  summarise(MIN = min(rate_change, na.rm = TRUE),
+            MAX = max(rate_change, na.rm = TRUE),
+            AVG = mean(rate_change, na.rm = TRUE),
+            BOTTOM_25 = mean(bottom_25, na.rm = TRUE),
+            TOP_25 = mean(top_25, na.rm = TRUE)) |> 
+  ungroup()
+
+# Calculate Percentage Changes
+ex_paths_pct_chg <- sim_path_agg |> 
+  pivot_longer(cols = !contains(c('days','sim')), names_to = 'currency',values_to = 'rate') |> 
+  arrange(currency, sim, days) |> 
+  left_join(x = _, y = joint_data |> 
+              select(currency, current_rate),
+            by = c('currency')) |> 
+  mutate(rate_chg = (rate - current_rate)/current_rate)
+  
+```
+
+```{r}
+#| include: false
+
+# Create AUD Path Plot
+aud_sim_path_plot <- ex_paths_pct_chg |>
+  filter(currency == 'AUD') |> 
+  ggplot(aes(x = days, y = rate_chg, color = factor(sim))) +
+  geom_line() +
+  theme(legend.position = 'none') +
+  geom_hline(yintercept = 0) +
+     # Add Historical Bounds
+  geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'AUD', select = 'MIN') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+   geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'AUD', select = 'MAX') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+  # Labels
+  xlab('Days') +
+  ylab('Exchange Rate Percentage Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle('AUD - Exchange Rate Simulated Paths')
+
+# Create CAD Path Plot
+cad_sim_path_plot <- ex_paths_pct_chg |>
+  filter(currency == 'CAD') |> 
+  ggplot(aes(x = days, y = rate_chg, color = factor(sim))) +
+  geom_line() +
+  theme(legend.position = 'none') +
+  geom_hline(yintercept = 0) +
+     # Add Historical Bounds
+  geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'CAD', select = 'MIN') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+   geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'CAD', select = 'MAX') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+  # Labels
+  xlab('Days') +
+  ylab('Exchange Rate Percentage Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle('CAD - Exchange Rate Simulated Paths')
+
+# Create GBP Path Plot
+gbp_sim_path_plot <- ex_paths_pct_chg |>
+  filter(currency == 'GBP') |> 
+  ggplot(aes(x = days, y = rate_chg, color = factor(sim))) +
+  geom_line() +
+  theme(legend.position = 'none') +
+  geom_hline(yintercept = 0) +
+     # Add Historical Bounds
+  geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'GBP', select = 'MIN') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+   geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'GBP', select = 'MAX') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+  # Labels
+  xlab('Days') +
+  ylab('Exchange Rate Percentage Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle('GBP - Exchange Rate Simulated Paths')
+
+# Create EUR Path Plot
+eur_sim_path_plot <- ex_paths_pct_chg |>
+  filter(currency == 'EUR') |> 
+  ggplot(aes(x = days, y = rate_chg, color = factor(sim))) +
+  geom_line() +
+  theme(legend.position = 'none') +
+  geom_hline(yintercept = 0) +
+     # Add Historical Bounds
+  geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'EUR', select = 'MIN') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+   geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'EUR', select = 'MAX') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+  # Labels
+  xlab('Days') +
+  ylab('Exchange Rate Percentage Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle('EUR - Exchange Rate Simulated Paths')
+
+# Create c Path Plot
+cny_sim_path_plot <- ex_paths_pct_chg |>
+  filter(currency == 'CNY') |> 
+  ggplot(aes(x = days, y = rate_chg, color = factor(sim))) +
+  geom_line() +
+  theme(legend.position = 'none') +
+  geom_hline(yintercept = 0) +
+     # Add Historical Bounds
+  geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'CNY', select = 'MIN') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+   geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'CNY', select = 'MAX') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+  # Labels
+  xlab('Days') +
+  ylab('Exchange Rate Percentage Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle('CNY - Exchange Rate Simulated Paths')
+
+# Create JPY Path Plot
+jpy_sim_path_plot <- ex_paths_pct_chg |>
+  filter(currency == 'JPY') |> 
+  ggplot(aes(x = days, y = rate_chg, color = factor(sim))) +
+  geom_line() +
+  theme(legend.position = 'none') +
+  geom_hline(yintercept = 0) +
+     # Add Historical Bounds
+  geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'JPY', select = 'MIN') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+   geom_hline(yintercept = subset(hist_path_stats, COUNTRY == 'JPY', select = 'MAX') |> pull(), 
+             color="red", linetype="dashed", lwd = 1) +
+  # Labels
+  xlab('Days') +
+  ylab('Exchange Rate Percentage Change') +
+  theme(text = element_text(size = 18)) + 
+  ggtitle('JPY - Exchange Rate Simulated Paths')
+
+```
+
+```{r path_plots_simulated_1}
+#| echo: false
+#| layout-ncol: 2
+
+# Output Plots
+aud_sim_path_plot
+cad_sim_path_plot
+
+```
+
+```{r path_plots_simulated_2}
+#| echo: false
+#| layout-ncol: 2
+
+gbp_sim_path_plot
+eur_sim_path_plot
+
+```
+
+```{r path_plots_simulated_3}
+#| echo: false
+#| layout-ncol: 2
+
+jpy_sim_path_plot
+cny_sim_path_plot
+
+```
+
+### Export Exchange Rate Paths
+
+```{r}
+
+# Export Exchange Rates As RDS
+sim_path_agg |>
+  saveRDS(object = _,
+          file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/',
+                        'SCU_Classes/Capstone/project/modeling/correlated_simulated_exchange_paths.rds'))
+
+```
