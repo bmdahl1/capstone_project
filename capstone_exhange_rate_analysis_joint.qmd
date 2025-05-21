@@ -4,6 +4,7 @@ author: "Brandon Dahl"
 format:
    html:
     code-overflow: wrap
+    code-fold: true
     theme: sandstone
     embed-resources: true
     toc: true
@@ -22,6 +23,7 @@ library(dplyr)
 library(tidyr)
 library(lubridate)
 library(ggplot2)
+library(plotly)
 
 # Turn Off Scientific Notation
 options(scipen = 100)
@@ -195,7 +197,7 @@ temp_plot <- exchange_df |>
   ggtitle(label = 'Foreign Currency Exhange Rate to USD - 25 Year History')
 
 # Show PLot
-temp_plot
+temp_plot |> plotly::ggplotly()
 
 ```
 
@@ -604,7 +606,8 @@ joint_data <- annual_volatility |>
 
 ### GBM Functions
 
-```{r}
+```{r gbm_functions}
+#| code-fold: false
 
 GBM <- function(N, sigma, mu, S0, Wt = NULL) {
   # Creates a single asset path of daily prices using Geometric Brownian Motion. 
@@ -669,7 +672,8 @@ CorrelatedGBM <- function(N, S0, mu, sigma, cor.mat) {
 
 ### Compute Simulated GBM Paths
 
-```{r}
+```{r compute_sim_gbm}
+#| code-fold: false
 
 # Parameters
 set.seed (1)
@@ -719,6 +723,7 @@ for (s in 1:sims){
 We'll want to confirm the correlation of daily log returns of the simulated paths are roughly similar to historical return correlation.
 
 ```{r}
+#| code-fold: false
 
 # Compute Returns
 sim_path_agg_returns <- sim_path_agg |> 
