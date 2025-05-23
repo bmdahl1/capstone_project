@@ -4,6 +4,7 @@ author: "Brandon Dahl"
 format:
    html:
     code-overflow: wrap
+    code-fold: false
     theme: sandstone
     embed-resources: true
     toc: true
@@ -29,6 +30,8 @@ options(scipen = 100)
 options(digits = 6)
 options(dplyr.summarise.inform = FALSE)
 
+# Compare VAR Reduction per hedge cost, compare to baseline VAR
+
 ```
 
 ```{r import_cash_flow_setup}
@@ -51,7 +54,7 @@ For our analysis, the focus of our optimization will be on a common risk metric 
 
 VAR is a statistical measure that gives an estimate of potential losses over a specified time period with a given confidence level. An accurate measure of VAR is key to understanding the riskiness of a portfolio.
 
-While a company manufacturing a product may not seem like an investment portfolio per se, it's most instructive in grasping foreign exchange risk to think of all international revenue as revenue that is forcibly invested in an asset that will yield a certain return. And that return will be the difference in exchange rates that arise between when the revenue is earned in the foreign currency, and when it's converted back to the domestic currency. As such, VAR is a useful metric fore measuring and optimizing foreign exchange risk.
+While a company manufacturing a product may not seem like an investment portfolio per se, it's most instructive in grasping foreign exchange risk to think of all international revenue as revenue that is forcibly invested in an asset that will yield a certain return. And that return will be the difference in exchange rates that arise between when the revenue is earned in the foreign currency, and when it's converted back to the domestic currency. As such, VAR is a useful metric for measuring and optimizing foreign exchange risk.
 
 ## Hedging Optimization
 
@@ -63,7 +66,7 @@ Initially the goal was to use a non-linear optimization framework to find the op
 
 $\begin{aligned}
 & {\text{minimize}}
-& & \sum_{n=0}^{n =5000} hedgingCost  \\
+& & \frac1n\sum_{n=0}^{n =5000} hedgingCost  \\
 & \text{subject to}
 & & VAR = Target\ VAR
 \end{aligned}$
@@ -444,21 +447,35 @@ The key takeaways from the optimization are the following:
 ```{r calculate_optimal_hedging}
 #| include: false
 
-# Get Optimized Hedge Ratios
-optimized_hedge_ratios <- subset(optimized_sims_clean, target_var == .015) |> select(contains('ratio'))
+# Get Hedged DataFrams
+optimized_sim_hedges <- do.call('rbind',
+                                lapply(X = list(.015, 
+                                                .02, 
+                                                .03, 
+                                                .04),
+                                       FUN = \(x) {
+                                         
+                                         optimized_hedge_ratios <- subset(optimized_sims_clean, 
+                                                                          target_var == x) |> 
+                                           select(contains('ratio'))
+                                         
+                                         # Calulate Hedge
+                                         temp_optimized_sim_hedge <- 
+                                           hedging_function(aud_hedge_ratio = optimized_hedge_ratios$aud_hedge_ratio,
+                                                            cad_hedge_ratio = optimized_hedge_ratios$cad_hedge_ratio,
+                                                            cny_hedge_ratio = optimized_hedge_ratios$cny_hedge_ratio,
+                                                            eur_hedge_ratio = optimized_hedge_ratios$eur_hedge_ratio,
+                                                            gbp_hedge_ratio = optimized_hedge_ratios$gbp_hedge_ratio,
+                                                            jpy_hedge_ratio = optimized_hedge_ratios$jpy_hedge_ratio,
+                                                            hedge_cost_pct = opt_hedge_cost_pct) |> 
+                                           purrr::simplify() |> 
+                                           dplyr::nth(n = 2) |> 
+                                           mutate(Hedged = 'Yes',
+                                                  VAR_Target = eval(x))
+                                         
+                                       }))
 
-# Get Zero Hedge Simulation
-optimized_sim_hedge <- hedging_function(aud_hedge_ratio = optimized_hedge_ratios$aud_hedge_ratio,
-                                        cad_hedge_ratio = optimized_hedge_ratios$cad_hedge_ratio,
-                                        cny_hedge_ratio = optimized_hedge_ratios$cny_hedge_ratio,
-                                        eur_hedge_ratio = optimized_hedge_ratios$eur_hedge_ratio,
-                                        gbp_hedge_ratio = optimized_hedge_ratios$gbp_hedge_ratio,
-                                        jpy_hedge_ratio = optimized_hedge_ratios$jpy_hedge_ratio,
-                                        hedge_cost_pct = opt_hedge_cost_pct) |> 
-  purrr::simplify() |> 
-  dplyr::nth(n = 2) |> 
-  mutate(Hedged = 'Yes')
-  
+
 # Get Optimized Hedge Simulation
 optimized_zero_hedge <- hedging_function(aud_hedge_ratio = 0,
                                         cad_hedge_ratio = 0,
@@ -469,13 +486,27 @@ optimized_zero_hedge <- hedging_function(aud_hedge_ratio = 0,
                                         hedge_cost_pct = opt_hedge_cost_pct) |> 
   purrr::simplify() |> 
   dplyr::nth(n = 2) |> 
-  mutate(Hedged = 'No')
+  mutate(Hedged = 'No',
+         VAR_Target = 0)
 
 # Create Joint Hedging
-optimized_hedging_joint <- optimized_sim_hedge |> 
+optimized_hedging_joint <- optimized_sim_hedges |> 
   union(x = _, y = optimized_zero_hedge) |> 
   arrange(Hedged, sim)
 
+# Get Baseline VAR
+baseline_var <- optimized_hedging_joint |> 
+  filter(Hedged=='No') |> 
+  pull(opt_total_cash_gain_loss) |> 
+  quantile(x = _, probs = .05) |> 
+  unlist() |> 
+  unname()
+
+# Add Baseline VAR to Simulations
+optimized_sims_clean <- optimized_sims_clean |> 
+  mutate(baseline_var = baseline_var,
+         var_reduction = abs(baseline_var) - abs(opt_total_var),
+         var_reduction_pct = var_reduction/abs(baseline_var))
 
 ```
 
@@ -485,6 +516,8 @@ optimized_hedging_joint <- optimized_sim_hedge |>
 optimized_sims_clean |> 
   mutate(opt_total_var_pct = abs(opt_total_var)/opt_total_cash_baseline_mean,
          opt_total_var_pct = round(opt_total_var_pct, 4)) |> 
+  select(-c(var_reduction, baseline_var)) |> 
+  relocate(target_var, .before = everything()) |> 
   gt::gt() |> 
   gt::tab_options(table.align = 'left',
                   table.font.size = 12) |> 
@@ -501,13 +534,15 @@ optimized_sims_clean |>
                  opt_total_revenue_mean = ' Hedged Revenue Mean',
                  opt_total_cash_gain_loss_mean = 'Gain/Loss vs. Baseline',
                  opt_total_var = 'Var 95%',
-                 opt_total_var_pct = 'VAR 95% Pct') |> 
+                 opt_total_var_pct = 'VAR 95% Pct',
+                 var_reduction_pct = 'VAR Reduction Pct') |> 
   gt::tab_spanner(label = 'Optimized Hedge Ratios', columns = contains('ratio')) |> 
-  gt::tab_spanner(label = 'Optimized Hedge Performance', columns = contains('opt')) |>
+  gt::tab_spanner(label = 'Optimized Hedge Performance', columns = c(contains(c('opt')),var_reduction_pct)) |> 
   # Format Values
-  gt::fmt_percent(columns = contains(c('ratio')), decimals = 2) |> 
-  gt::fmt_currency(columns = contains(c('mean','total_var')), decimals = 0) |> 
-  gt::fmt_percent(columns = contains('pct'), decimals = 2) |> 
+  gt::fmt_percent(columns = contains(c('ratio')), decimals = 2) |>
+  gt::fmt_currency(columns = contains(c('mean','total_var')), decimals = 0) |>
+  gt::fmt_percent(columns = contains('pct'), decimals = 2) |>
+  gt::fmt_percent(columns = c(var_reduction_pct), decimals = 0) |>
   # Add Borders
   tab_style(
     style = cell_borders(
@@ -516,15 +551,18 @@ optimized_sims_clean |>
       weight = px(1.5),
       style = "solid"
     ),
-    locations = cells_body(columns = c(target_var,jpy_hedge_ratio))
+    locations = cells_body(columns = c(jpy_hedge_ratio))
   )
 
 ```
 
-```{r optimal_hedging_plot}
+```{r optimal_hedging_plot_1}
 #| echo: false
+#| layout-ncol: 2
 
+# Target Var .04
 optimized_hedging_joint |> 
+  filter(VAR_Target %in% c(.04,0)) |> 
   mutate(category = factor(Hedged, levels = c('Yes','No'))) |> 
   ggplot(aes(x = opt_total_revenue, fill = Hedged)) +
   geom_histogram(alpha = .5, bins = 50,  position = 'identity') +
@@ -537,7 +575,8 @@ optimized_hedging_joint |>
              linetype = 'dashed', 
              lwd = 1) +
   geom_vline(xintercept = optimized_hedging_joint |> 
-               filter(Hedged == 'Yes') |> 
+               filter(Hedged == 'Yes',
+                      VAR_Target == .04) |> 
                pull(opt_total_revenue) |> 
                mean(), 
              color = '#00BFC4', 
@@ -545,7 +584,91 @@ optimized_hedging_joint |>
              linetype = 'dashed', 
              lwd = 1) +
   xlab('Optimized Total Revenuye') +
-  ggtitle('Hedged vs. Non-Hedged Portfolio') 
+  ggtitle('Hedged vs. Non-Hedged Portfolio (VAR Target .04%)') 
+
+# Target Var .03
+optimized_hedging_joint |> 
+  filter(VAR_Target %in% c(.03,0)) |> 
+  mutate(category = factor(Hedged, levels = c('Yes','No'))) |> 
+  ggplot(aes(x = opt_total_revenue, fill = Hedged)) +
+  geom_histogram(alpha = .5, bins = 50,  position = 'identity') +
+  geom_vline(xintercept = optimized_hedging_joint |> 
+               filter(Hedged == 'No') |> 
+               pull(opt_total_revenue) |> 
+               mean(), 
+             color = 'red', 
+             alpha = .5,
+             linetype = 'dashed', 
+             lwd = 1) +
+  geom_vline(xintercept = optimized_hedging_joint |> 
+               filter(Hedged == 'Yes',
+                      VAR_Target == .03) |> 
+               pull(opt_total_revenue) |> 
+               mean(), 
+             color = '#00BFC4', 
+             alpha = 1,
+             linetype = 'dashed', 
+             lwd = 1) +
+  xlab('Optimized Total Revenuye') +
+  ggtitle('Hedged vs. Non-Hedged Portfolio (VAR Target .03%)')
+
+```
+
+```{r plots_2}
+#| echo: false
+#| layout-ncol: 2
+
+# Target Var .02
+optimized_hedging_joint |> 
+  filter(VAR_Target %in% c(.02,0)) |> 
+  mutate(category = factor(Hedged, levels = c('Yes','No'))) |> 
+  ggplot(aes(x = opt_total_revenue, fill = Hedged)) +
+  geom_histogram(alpha = .5, bins = 50,  position = 'identity') +
+  geom_vline(xintercept = optimized_hedging_joint |> 
+               filter(Hedged == 'No') |> 
+               pull(opt_total_revenue) |> 
+               mean(), 
+             color = 'red', 
+             alpha = .5,
+             linetype = 'dashed', 
+             lwd = 1) +
+  geom_vline(xintercept = optimized_hedging_joint |> 
+               filter(Hedged == 'Yes',
+                      VAR_Target == .02) |> 
+               pull(opt_total_revenue) |> 
+               mean(), 
+             color = '#00BFC4', 
+             alpha = 1,
+             linetype = 'dashed', 
+             lwd = 1) +
+  xlab('Optimized Total Revenuye') +
+  ggtitle('Hedged vs. Non-Hedged Portfolio (VAR Target 2%)') 
+
+# Target Var .015
+optimized_hedging_joint |> 
+  filter(VAR_Target %in% c(.015,0)) |> 
+  mutate(category = factor(Hedged, levels = c('Yes','No'))) |> 
+  ggplot(aes(x = opt_total_revenue, fill = Hedged)) +
+  geom_histogram(alpha = .5, bins = 50,  position = 'identity') +
+  geom_vline(xintercept = optimized_hedging_joint |> 
+               filter(Hedged == 'No') |> 
+               pull(opt_total_revenue) |> 
+               mean(), 
+             color = 'red', 
+             alpha = .5,
+             linetype = 'dashed', 
+             lwd = 1) +
+  geom_vline(xintercept = optimized_hedging_joint |> 
+               filter(Hedged == 'Yes',
+                      VAR_Target == .015) |> 
+               pull(opt_total_revenue) |> 
+               mean(), 
+             color = '#00BFC4', 
+             alpha = 1,
+             linetype = 'dashed', 
+             lwd = 1) +
+  xlab('Optimized Total Revenuye') +
+  ggtitle('Hedged vs. Non-Hedged Portfolio (VAR Target 1.5%)')
 
 ```
 
