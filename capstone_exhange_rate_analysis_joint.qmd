@@ -279,7 +279,7 @@ daily_return_matrix |>
   gt::gt(rownames_to_stub = TRUE) |> 
   gt::tab_options(table.align = 'left') |> 
   gt::tab_header(title = 'Correlation Matrix') |> 
-  gt::fmt_number(decimals = 4)
+  gt::fmt_percent(decimals = 2)
 
 ```
 
@@ -587,12 +587,14 @@ term
 
 ### Assumptions
 
-For each country we'll use their historical daily volalitility as $\sigma$, and we'll assume a zero drift rate for all currencies. Financial theory dictates that the differences in each countries respective risk free rate vs. the domestic currency may be used as the drift rate to indicate the cost of holding the one currency compared to the other. For this analysis we won't be incorporating the risk free rates of return.
+For each country we'll use their historical daily volatility as $\sigma$, and we'll assume a zero drift rate for all currencies. 
 
-```{r}
+Financial theory dictates that the differences in each countries respective risk free rate vs. the domestic currency may be used as the drift rate to indicate the cost of holding the one currency compared to the other. For this analysis we won't be incorporating the risk free rates of return.
+
+```{r create_joint_data}
 #| include: false
 
-# Create Joint Dataset
+# Create Joint Data Set
 joint_data <- annual_volatility |> 
   select(currency, daily_volatility) |> 
   left_join(x = _, y = exchange_df |> 
@@ -607,7 +609,6 @@ joint_data <- annual_volatility |>
 ### GBM Functions
 
 ```{r gbm_functions}
-#| code-fold: false
 
 GBM <- function(N, sigma, mu, S0, Wt = NULL) {
   # Creates a single asset path of daily prices using Geometric Brownian Motion. 
@@ -673,7 +674,6 @@ CorrelatedGBM <- function(N, S0, mu, sigma, cor.mat) {
 ### Compute Simulated GBM Paths
 
 ```{r compute_sim_gbm}
-#| code-fold: false
 
 # Parameters
 set.seed (1)
@@ -711,7 +711,7 @@ for (s in 1:sims){
   sim_path_agg <- rbind(sim_path_agg,
                         temp_corr_gbm_df)
   
-  # Kill Variablesa
+  # Kill Variables
   rm(temp_corr_gbm_df,temp_corr_gbm)
 
 }
@@ -723,7 +723,6 @@ for (s in 1:sims){
 We'll want to confirm the correlation of daily log returns of the simulated paths are roughly similar to historical return correlation.
 
 ```{r}
-#| code-fold: false
 
 # Compute Returns
 sim_path_agg_returns <- sim_path_agg |> 
@@ -739,7 +738,7 @@ sim_path_agg_returns <- sim_path_agg |>
   select(days, sim, contains('RETURNS')) |> 
   arrange(sim, days)
 
-# Calcualte Correlation
+# Calculate Correlation
 sim_path_agg_returns_cor <- sim_path_agg_returns |>
   select(contains('RETURNS')) |> 
   cor()
@@ -752,7 +751,7 @@ rownames(sim_path_agg_returns_cor) <- joint_data$currency
 ```{r}
 #| echo: false
 
-# Creat Table
+# Create Table
 sim_path_agg_returns_cor |> 
   as.data.frame() |> 
   {\(.)
@@ -760,17 +759,17 @@ sim_path_agg_returns_cor |>
   gt::gt(rownames_to_stub = TRUE) |> 
   gt::tab_header(title = 'Simulated Exchange Path Correlations') |> 
   gt::tab_options(table.align = 'left') |> 
-  gt::fmt_number(decimals = 5)
+  gt::fmt_percent(decimals = 2)
 
 ```
 
 ### Analyze Exchange Rate Paths
 
-Below are the simulated GBM paths for each currency exchange rate. Included are historical yearly changes to serve as a comparison for actual changes.
+Below are the simulated GBM paths for each currency exchange rate. Included are the max historical yearly changes to serve as a comparison for actual changes.
 
-You can see that the majority of the simulated paths fit mostly within historical annual changes.
+You can see that the majority of the simulated paths fit within 25-year historical max and mins, except where historical max and mins are assymetric. 
 
-```{r}
+```{r analyze_exchange_rates}
 #| include: false
 
 # Calculate Statistics
@@ -817,7 +816,7 @@ ex_paths_pct_chg <- sim_path_agg |>
   
 ```
 
-```{r}
+```{r create_sim_path_plots}
 #| include: false
 
 # Create AUD Path Plot
@@ -958,9 +957,8 @@ cny_sim_path_plot
 
 ```
 
-### Export Exchange Rate Paths
-
-```{r}
+```{r export_data}
+#| include: false
 
 # Export Exchange Rates As RDS
 sim_path_agg |>
