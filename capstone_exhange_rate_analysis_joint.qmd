@@ -587,7 +587,7 @@ term
 
 ### Assumptions
 
-For each country we'll use their historical daily volatility as $\sigma$, and we'll assume a zero drift rate for all currencies. 
+For each country we'll use their historical daily volatility as $\sigma$, and we'll assume a zero drift rate for all currencies.
 
 Financial theory dictates that the differences in each countries respective risk free rate vs. the domestic currency may be used as the drift rate to indicate the cost of holding the one currency compared to the other. For this analysis we won't be incorporating the risk free rates of return.
 
@@ -767,7 +767,7 @@ sim_path_agg_returns_cor |>
 
 Below are the simulated GBM paths for each currency exchange rate. Included are the max historical yearly changes to serve as a comparison for actual changes.
 
-You can see that the majority of the simulated paths fit within 25-year historical max and mins, except where historical max and mins are assymetric. 
+You can see that the majority of the simulated paths fit within 25-year historical max and mins, except where historical max and mins are assymetric.
 
 ```{r analyze_exchange_rates}
 #| include: false

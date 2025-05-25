@@ -83,10 +83,9 @@ current_exchange_rates <- getFX(c('USD/EUR',
                                   'USD/AUD',
                                   'USD/CAD',
                                   'USD/GBP'),
-                                from=Sys.Date()-5,
-                                to = Sys.Date(), 
+                                from=as.Date('2025-05-16'),
+                                to = as.Date('2025-05-25'), 
                                 auto.assign = TRUE)
-
 
 ```
 
@@ -238,7 +237,7 @@ int_revenue <- subset(hist_revenue_region_clean, date == 2024, select = row_pct)
 # Setup Cash Flow Calculations
 cash_flow_setup <- ex_paths |> 
   janitor::clean_names() |> 
-  # UPdate Names
+  # Update Names
   {\(.)
       rename_with(., ~ paste0('simulated_rate_', .x, recycle0 = TRUE), !contains(c('days','sim')))}() |> 
   # Add Current Exchange Rate
@@ -252,6 +251,7 @@ cash_flow_setup <- ex_paths |>
   # Add Forecast Company Revenue
   mutate(forecast_gross_revenue_int = (subset(growth_estimates_clean, year == 2025, select = revenue_estimate) |> 
                                          pull())*1000*int_revenue) |> 
+  group_by(sim) |> 
   # Calculate Country Revenue Total (USD)
   mutate(rev_current_aud = forecast_gross_revenue_int*rev_pct_aud, 
          rev_current_cad = forecast_gross_revenue_int*rev_pct_cad, 
@@ -267,12 +267,12 @@ cash_flow_setup <- ex_paths |>
          rev_current_daily_gbp = rev_current_gbp/252,
          rev_current_daily_jpy = rev_current_jpy/252) |> 
   # Calculate Daily Revenue Converted 
-  mutate(rev_current_daily_sim_aud = (rev_current_daily_aud*exchange_rate_current_aud)/simulated_rate_aud,
-         rev_current_daily_sim_cad = (rev_current_daily_cad*exchange_rate_current_cad)/simulated_rate_cad,
-         rev_current_daily_sim_cny = (rev_current_daily_cny*exchange_rate_current_cny)/simulated_rate_cny,
-         rev_current_daily_sim_eur = (rev_current_daily_eur*exchange_rate_current_eur)/simulated_rate_eur,
-         rev_current_daily_sim_gbp = (rev_current_daily_gbp*exchange_rate_current_gbp)/simulated_rate_gbp,
-         rev_current_daily_sim_jpy = (rev_current_daily_jpy*exchange_rate_current_jpy)/simulated_rate_jpy) |> 
+  mutate(rev_current_daily_sim_aud = (rev_current_daily_aud*exchange_rate_current_aud)/mean(simulated_rate_aud),
+         rev_current_daily_sim_cad = (rev_current_daily_cad*exchange_rate_current_cad)/mean(simulated_rate_cad),
+         rev_current_daily_sim_cny = (rev_current_daily_cny*exchange_rate_current_cny)/mean(simulated_rate_cny),
+         rev_current_daily_sim_eur = (rev_current_daily_eur*exchange_rate_current_eur)/mean(simulated_rate_eur),
+         rev_current_daily_sim_gbp = (rev_current_daily_gbp*exchange_rate_current_gbp)/mean(simulated_rate_gbp),
+         rev_current_daily_sim_jpy = (rev_current_daily_jpy*exchange_rate_current_jpy)/mean(simulated_rate_jpy)) |> 
   # Calculate Total Cash
   mutate(rev_total_current = rev_current_daily_aud + rev_current_daily_cad + 
            rev_current_daily_cny + rev_current_daily_eur + 
@@ -280,6 +280,7 @@ cash_flow_setup <- ex_paths |>
          rev_total_current_sim = rev_current_daily_sim_aud + rev_current_daily_sim_cad +
            rev_current_daily_sim_cny + rev_current_daily_sim_eur + 
            rev_current_daily_sim_gbp + rev_current_daily_sim_jpy) |> 
+  ungroup() |> 
   # Reorder
   arrange(sim, days)
 
