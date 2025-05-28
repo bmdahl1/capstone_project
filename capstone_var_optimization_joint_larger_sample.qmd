@@ -312,101 +312,102 @@ min_hedge_pcts <- c(0, .05, .1, .25, .5)
 ```{r}
 #| include: false
 
-# Read In
-optimized_sims <- readRDS(file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
-                                         'Capstone/project/modeling/optimization_results.rds'))
+# # Read In
+# optimized_sims <- readRDS(file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+#                                          'Capstone/project/modeling/optimization_results.rds'))
+
 
 ```
 
 ```{r}
 
-# # Create Optimized Simulations
-# optimized_sims <- data.frame()
-# 
-# # Loop Through Vars
-# for (v in 1:length(target_var_ratio)){
-# 
-#   # Set Temp Target Var
-#   temp.target.var <- target_var_ratio[v]
-# 
-#   # Get Target VAR
-#   target_var <- (hedging_function(aud_hedge_ratio = 0,
-#                                   cad_hedge_ratio = 0,
-#                                   cny_hedge_ratio = 0,
-#                                   eur_hedge_ratio = 0,
-#                                   gbp_hedge_ratio = 0,
-#                                   jpy_hedge_ratio = 0,
-#                                   hedge_cost_pct = 0) |>
-#                    purrr::simplify() |>
-#                    dplyr::last() |>
-#                    pull(opt_total_cash_baseline_mean))*temp.target.var
-# 
-#   # Setup Simulations
-#   total_sims <- 1000
-# 
-#   # Optimized Sims Count
-#   optim_sim_cnt <- 0
-# 
-#   # Notify user
-#   paste0('Performing Optimization For Target Var: ', temp.target.var) |> print()
-# 
-#   # Perform Simulation
-#   for (s in 1:total_sims){
-# 
-#     # Get Random
-#     temp.rand.aud <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
-#     temp.rand.cad <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
-#     temp.rand.cny <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
-#     temp.rand.eur <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
-#     temp.rand.gbp <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
-#     temp.rand.jpy <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
-# 
-#     # Run Function
-#     temp.hedge <- hedging_function(aud_hedge_ratio = temp.rand.aud,
-#                                    cad_hedge_ratio = temp.rand.cad,
-#                                    cny_hedge_ratio = temp.rand.cny,
-#                                    eur_hedge_ratio = temp.rand.eur,
-#                                    gbp_hedge_ratio = temp.rand.gbp,
-#                                    jpy_hedge_ratio = temp.rand.jpy,
-#                                    hedge_cost_pct = opt_hedge_cost_pct)
-# 
-#     # Get Temp Var
-#     temp.var <- temp.hedge$opt_df_hedged_mc_summary$opt_total_var
-# 
-#     # Check
-#     if (all(abs(temp.var) <= (target_var + 1),
-#             abs(temp.var) >= (target_var - 1))){
-# 
-#       # Increase Counter
-#       optim_sim_cnt <- optim_sim_cnt + 1
-# 
-#       # Notify user
-#       paste0('    ',optim_sim_cnt,' Optimized Portfolios Found') |> print()
-# 
-#       # Test
-#       temp.optimized <- data.frame(target_var = temp.target.var,
-#                                    aud_hedge_ratio = temp.rand.aud,
-#                                    cad_hedge_ratio = temp.rand.cad,
-#                                    cny_hedge_ratio = temp.rand.cny,
-#                                    eur_hedge_ratio = temp.rand.eur,
-#                                    gbp_hedge_ratio = temp.rand.gbp,
-#                                    jpy_hedge_ratio = temp.rand.jpy,
-#                                    opt_total_hedge_cost_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_hedge_cost_mean,
-#                                    opt_total_cash_baseline_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_cash_baseline_mean,
-#                                    opt_total_revenue_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_revenue_mean,
-#                                    opt_total_cash_gain_loss_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_cash_gain_loss_mean,
-#                                    opt_total_var = temp.hedge$opt_df_hedged_mc_summary$opt_total_var)
-# 
-#       # Save Optimized Portfolios
-#       optimized_sims <- rbind(optimized_sims,
-#                               temp.optimized) |>
-#         arrange(opt_total_hedge_cost_mean)
-# 
-#     }
-# 
-#   }
-# 
-# }
+# Create Optimized Simulations
+optimized_sims <- data.frame()
+
+# Loop Through Vars
+for (v in 1:length(target_var_ratio)){
+
+  # Set Temp Target Var
+  temp.target.var <- target_var_ratio[v]
+
+  # Get Target VAR
+  target_var <- (hedging_function(aud_hedge_ratio = 0,
+                                  cad_hedge_ratio = 0,
+                                  cny_hedge_ratio = 0,
+                                  eur_hedge_ratio = 0,
+                                  gbp_hedge_ratio = 0,
+                                  jpy_hedge_ratio = 0,
+                                  hedge_cost_pct = 0) |>
+                   purrr::simplify() |>
+                   dplyr::last() |>
+                   pull(opt_total_cash_baseline_mean))*temp.target.var
+
+  # Setup Simulations
+  total_sims <- 5000
+
+  # Optimized Sims Count
+  optim_sim_cnt <- 0
+
+  # Notify user
+  paste0('Performing Optimization For Target Var: ', temp.target.var) |> print()
+
+  # Perform Simulation
+  for (s in 1:total_sims){
+
+    # Get Random
+    temp.rand.aud <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+    temp.rand.cad <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+    temp.rand.cny <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+    temp.rand.eur <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+    temp.rand.gbp <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+    temp.rand.jpy <- runif(n = 1, min = min_hedge_pcts[v], max = .95)
+
+    # Run Function
+    temp.hedge <- hedging_function(aud_hedge_ratio = temp.rand.aud,
+                                   cad_hedge_ratio = temp.rand.cad,
+                                   cny_hedge_ratio = temp.rand.cny,
+                                   eur_hedge_ratio = temp.rand.eur,
+                                   gbp_hedge_ratio = temp.rand.gbp,
+                                   jpy_hedge_ratio = temp.rand.jpy,
+                                   hedge_cost_pct = opt_hedge_cost_pct)
+
+    # Get Temp Var
+    temp.var <- temp.hedge$opt_df_hedged_mc_summary$opt_total_var
+
+    # Check
+    if (all(abs(temp.var) <= (target_var + 1),
+            abs(temp.var) >= (target_var - 1))){
+
+      # Increase Counter
+      optim_sim_cnt <- optim_sim_cnt + 1
+
+      # Notify user
+      paste0('    ',optim_sim_cnt,' Optimized Portfolios Found') |> print()
+
+      # Test
+      temp.optimized <- data.frame(target_var = temp.target.var,
+                                   aud_hedge_ratio = temp.rand.aud,
+                                   cad_hedge_ratio = temp.rand.cad,
+                                   cny_hedge_ratio = temp.rand.cny,
+                                   eur_hedge_ratio = temp.rand.eur,
+                                   gbp_hedge_ratio = temp.rand.gbp,
+                                   jpy_hedge_ratio = temp.rand.jpy,
+                                   opt_total_hedge_cost_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_hedge_cost_mean,
+                                   opt_total_cash_baseline_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_cash_baseline_mean,
+                                   opt_total_revenue_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_revenue_mean,
+                                   opt_total_cash_gain_loss_mean = temp.hedge$opt_df_hedged_mc_summary$opt_total_cash_gain_loss_mean,
+                                   opt_total_var = temp.hedge$opt_df_hedged_mc_summary$opt_total_var)
+
+      # Save Optimized Portfolios
+      optimized_sims <- rbind(optimized_sims,
+                              temp.optimized) |>
+        arrange(opt_total_hedge_cost_mean)
+
+    }
+
+  }
+
+}
 
 ```
 
@@ -414,9 +415,23 @@ optimized_sims <- readRDS(file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes
 #| include: false
 
 # Export to RDS
-optimized_sims |>
-saveRDS(object = _, file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
-                                       'Capstone/project/modeling/optimization_results.rds'))
+# optimized_sims |>
+# saveRDS(object = _, file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+#                                        'Capstone/project/modeling/optimization_results.rds'))
+
+```
+
+## Optimization Results
+
+```{r}
+
+# z <- hedging_function(aud_hedge_ratio = 1,
+#                       cad_hedge_ratio = 1,
+#                       cny_hedge_ratio = 1,
+#                       eur_hedge_ratio = 1,
+#                       gbp_hedge_ratio = 1,
+#                       jpy_hedge_ratio = 1,
+#                       hedge_cost_pct = opt_hedge_cost_pct)
 
 ```
 
