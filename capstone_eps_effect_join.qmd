@@ -1,0 +1,300 @@
+---
+title: "Capstone - EPS Effect"
+author: "Brandon Dahl"
+format:
+   html:
+    code-overflow: wrap
+    code-fold: true
+    theme: sandstone
+    embed-resources: true
+    toc: true
+    toc-depth: 4
+editor: visual
+---
+
+```{r import_libraries}
+#| include: false
+
+# Clear Variables
+rm(list = ls())
+
+# Import Tidyverse Libraries
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(gt)
+library(readxl)
+
+# Turn Off Scientific Notation
+options(scipen = 100)
+options(digits = 6)
+options(dplyr.summarise.inform = FALSE)
+
+```
+
+```{r import_simulation_data}
+#| include: false
+
+# Excel Path
+excel_path <- 'C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/Capstone/project/regn_valuation.xlsx'
+
+# Import Growth Estimates
+growth_estimates <- readxl::read_excel(path = excel_path,
+                                       sheet = 'Growth_Estimates',
+                                       range = 'B4:K14')
+
+# Import Earnings per Share
+hist_eps <- readxl::read_excel(path = excel_path,
+                               sheet = 'Income_Statement',
+                               skip = 19,
+                               range = 'C6:H26')
+
+# Import Historical Revenue
+hist_revenue <- readxl::read_excel(path = excel_path,
+                                   sheet = 'Income_Statement',
+                                   range = 'C6:H7')
+
+# Import Optimized Simulations All
+optimized_sims_all <- readRDS(file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+                                       'Capstone/project/modeling/optimization_results.rds'))
+
+# Import Optimized Best Simulations
+optimized_sims_suummary <- readRDS(file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+                                                 'Capstone/project/modeling/optimized_simulations_summary.rds'))
+
+
+```
+
+```{r clean_data}
+#| include: false
+
+# Create Growth Estimates Clean
+growth_estimates_clean <- growth_estimates |> 
+  select(Year, `Revenue Estimate`, `Net Revenue`, EPS, Shares) |> 
+  janitor::clean_names()
+
+# Clean Historical Revenue
+hist_revenue_clean <- hist_revenue |> 
+  pivot_longer(cols = everything(), names_to = 'year', values_to = 'revenue_actual') |> 
+  mutate(revenue_actual = revenue_actual/1000,
+         revenue_estimate = NA_real_, 
+         net_revenue = NA_real_,
+         eps = NA_real_,
+         year = as.double(year),
+         shares = NA_real_)
+
+# Create Revenue Data
+hist_eps_clean <- hist_eps |> 
+  filter(row_number() == 20) |> 
+  pivot_longer(cols = everything(), names_to = 'YEAR', values_to = 'EPS') |> 
+  rename(eps_actual = EPS,
+         year = YEAR) |> 
+  mutate(year = as.double(year))
+         
+```
+
+## Earnings Per Share
+
+```{r clean_revenue_data}
+#| include: false
+
+# Create Joint EPS
+joint_eps <- hist_eps_clean |> 
+  rename(eps = eps_actual) |> 
+  mutate(category = 'Actual') |> 
+  union(x =  _, y = growth_estimates_clean |> 
+          select(year, eps) |> 
+          mutate(category = 'Forecast'))
+
+```
+
+```{r plot_current_forecast_eps}
+#| echo: false
+
+joint_eps |> 
+  ggplot(aes(x = year, y = eps, color = category)) +
+  geom_line() +
+  geom_point() +
+  ggtitle('Regeneron - Earnings Per Share') +
+  xlab(element_blank()) +
+  ylab('Earnings Per Share')
+
+```
+
+### VAR Scenarios
+
+```{r}
+
+# Calculate EPS In Hedged vs. Unhedged
+optimized_sims_eps <- optimized_sims_suummary |> 
+  select(target_var, baseline_revenue_unhedged, baseline_var, opt_total_revenue_mean, opt_total_var) |> 
+  mutate(baseline_var_pct = abs(baseline_var)/baseline_revenue_unhedged,
+         opt_total_var_pct = abs(opt_total_var)/ baseline_revenue_unhedged)
+
+```
+
+## Forecast
+
+```{r}
+
+# Parameters
+int_rev_pct <- .45
+net_inc_margin <- .3107
+
+# Create Joint Data
+joint_revenue <-   growth_estimates_clean |> 
+  mutate(revenue_actual = NA_real_) |> 
+  union(x = _, y = hist_revenue_clean) |> 
+  left_join(x = _, y = hist_eps_clean, by = 'year') |> 
+  tidyr::fill(shares, .direction = 'updown') |> 
+  arrange(year)
+
+# Calculate Heded vs. Unhedged Forecast of EPS
+joint_revenue_calcs <- joint_revenue |> 
+  # Breakdown Revenue
+  mutate(revenue_estimate_domestic = (1 - .45)*revenue_estimate,
+         revenue_estimte_int = revenue_estimate*.45) |> 
+  # Add VAR Percentages
+  mutate(baseline_var = mean(optimized_sims_eps$baseline_var_pct),
+         target_var_05 = subset(optimized_sims_eps, target_var == .05, select = opt_total_var_pct)[[1]],
+         target_var_04 = subset(optimized_sims_eps, target_var == .04, select = opt_total_var_pct)[[1]],
+         target_var_03 = subset(optimized_sims_eps, target_var == .03, select = opt_total_var_pct)[[1]],
+         target_var_02 = subset(optimized_sims_eps, target_var == .02, select = opt_total_var_pct)[[1]],
+         target_var_01 = subset(optimized_sims_eps, target_var == .01, select = opt_total_var_pct)[[1]]) |> 
+  # Create Revenue Estimates
+  mutate(revenue_estimate_int_unhedged = revenue_estimte_int*(1 - baseline_var),
+         revenue_estimate_int_05 = revenue_estimte_int*(1 - target_var_05),
+         revenue_estimate_int_04 = revenue_estimte_int*(1 - target_var_04),
+         revenue_estimate_int_03 = revenue_estimte_int*(1 - target_var_03),
+         revenue_estimate_int_02 = revenue_estimte_int*(1 - target_var_02),
+         revenue_estimate_int_01 = revenue_estimte_int*(1 - target_var_01)) |> 
+  # Calculate Total Revenue
+  mutate(revenue_estimate_unhedged = revenue_estimate_domestic + revenue_estimate_int_unhedged,
+         revenue_estimate_hedged_05 = revenue_estimate_domestic + revenue_estimate_int_05,
+         revenue_estimate_hedged_04 = revenue_estimate_domestic + revenue_estimate_int_04,
+         revenue_estimate_hedged_03 = revenue_estimate_domestic + revenue_estimate_int_03,
+         revenue_estimate_hedged_02 = revenue_estimate_domestic + revenue_estimate_int_02,
+         revenue_estimate_hedged_01 = revenue_estimate_domestic + revenue_estimate_int_01) |> 
+  # Calculate Net Income
+  mutate(net_revenue_unhedged = revenue_estimate_unhedged*net_inc_margin,
+         net_revenue_hedged_05 = revenue_estimate_hedged_05*net_inc_margin,
+         net_revenue_hedged_04 = revenue_estimate_hedged_04*net_inc_margin,
+         net_revenue_hedged_03 = revenue_estimate_hedged_03*net_inc_margin,
+         net_revenue_hedged_02 = revenue_estimate_hedged_02*net_inc_margin,
+         net_revenue_hedged_01 = revenue_estimate_hedged_01*net_inc_margin) |> 
+  # Calculate Earnings Per Share
+  mutate(eps_unhedged = net_revenue_unhedged/shares,
+         eps_hedged_05 = net_revenue_hedged_05/shares,
+         eps_hedged_04 = net_revenue_hedged_04/shares,
+         eps_hedged_03 = net_revenue_hedged_03/shares,
+         eps_hedged_02 = net_revenue_hedged_02/shares,
+         eps_hedged_01 = net_revenue_hedged_01/shares) |> 
+  # Calculate Percentage Change
+  mutate(eps_unhedged_pct = 1 - eps_unhedged/eps,
+         eps_hedged_05_pct = 1 - eps_hedged_01/eps)
+         
+
+```
+
+### Plot
+
+```{r}
+#| echo: false
+
+# Plot Baseline Earnings Per Share
+plot(x = joint_revenue_calcs$year,
+     y = joint_revenue_calcs$eps,
+     type = 'l',
+     lwd = 2,
+     xlim  = c(2025,2034),
+     xlab = 'Year',
+     ylab = 'Earnings Per Share',
+     main = 'EPS Forecast - Hedged vs. Non-Hedged')
+
+# Ploot Unhedged EPS
+lines(x = joint_revenue_calcs$year,
+      y = joint_revenue_calcs$eps_unhedged,
+      col = 'red',
+      lty = 'dashed',
+      lwd = 3)
+    
+# Plot Hedged 05 
+lines(x = joint_revenue_calcs$year,
+      y = joint_revenue_calcs$eps_hedged_05,
+      col = 'blue',
+      lwd = 2,
+      lty = 'dotted')
+
+# Plot Hedged 04 
+lines(x = joint_revenue_calcs$year,
+      y = joint_revenue_calcs$eps_hedged_04,
+      col = 'green',
+      lwd = 2,
+      lty = 'dotted')
+
+# Plot Hedged 03
+lines(x = joint_revenue_calcs$year,
+      y = joint_revenue_calcs$eps_hedged_03,
+      col = 'purple',
+      lwd = 2,
+      lty = 'dotted')
+
+# Plot Hedged 03
+lines(x = joint_revenue_calcs$year,
+      y = joint_revenue_calcs$eps_hedged_02,
+      col = 'orange',
+      lwd = 2,
+      lty = 'dotted')
+
+
+# Plot Hedged 03
+lines(x = joint_revenue_calcs$year,
+      y = joint_revenue_calcs$eps_hedged_01,
+      col = 'black',
+      lwd = 3,
+      lty = 'dotted')
+
+# Create Legend
+legend('bottomright',
+       legend = c('Forecast',
+                  'Unhedged Forecast',
+                  'Hedged VAR 1%',
+                  'Hedged VAR 2%',
+                  'Hedged VAR 3%',
+                  'Hedged VAR 4%',
+                  'Hedged VAR 5%'),
+       col = c('black','red','black',
+               'orange','purple',
+               'green','blue'),
+       lty = c('solid','dotted','dashed','dashed','dashed','dashed','dashed'),
+       lwd = c(2,3,3,2,2,2,2))
+
+```
+
+### Table
+
+```{r gt_table_optimized_eps}
+#| echo: false
+
+# Create EPS Onluy
+eps_forecasts <- joint_revenue_calcs |> 
+  select(year, eps, eps_unhedged, eps_hedged_01, eps_hedged_02, eps_hedged_03, eps_hedged_04, eps_hedged_05)
+
+# Create GT Table
+eps_forecasts |> 
+  drop_na(eps) |> 
+  gt::gt() |> 
+  gt::tab_header(title = 'Earnings Per Share - Hedged vs. Unhedged') |> 
+  gt::cols_label(year = 'Year',
+                 eps = 'EPS',
+                 eps_unhedged = 'Unhedged',
+                 eps_hedged_01 = 'VAR 1%',
+                 eps_hedged_02 = 'VAR 2%',
+                 eps_hedged_03 = 'VAR 3%',
+                 eps_hedged_04 = 'VAR 4%',
+                 eps_hedged_05 = 'VAR 5%') |> 
+  gt::fmt_currency(columns = contains('eps'), decimals = 1) |> 
+  gt::tab_spanner(label = 'Base Forecast', columns = eps) |> 
+  gt::tab_spanner(label = 'Unhedged', columns = contains('unhedged')) |>
+  gt::tab_spanner(label = 'Hedged', columns = contains('_hedged'))
+```

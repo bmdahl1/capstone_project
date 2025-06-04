@@ -30,8 +30,6 @@ options(scipen = 100)
 options(digits = 6)
 options(dplyr.summarise.inform = FALSE)
 
-# Compare VAR Reduction per hedge cost, compare to baseline VAR
-
 ```
 
 ```{r import_cash_flow_setup}
@@ -775,7 +773,6 @@ optimized_hedging_joint |>
   xlab('Optimized Total Revenue') +
   ggtitle('Portfolio VAR Target 1%')
 
-
 ```
 
 ### Hedging Sensitivity
@@ -844,4 +841,13 @@ hedge_regression |>
   gt::tab_options(table.align = 'left') |> 
   gt::tab_header(title = 'Regression Accuracy')
   
+```
+
+```{r export_results}
+
+# Export to RDS
+optimized_sims_clean_base_added |>
+saveRDS(object = _, file = paste0('C:/Users/bmdah/OneDrive/Desktop/Classes/SCU_Classes/',
+                                       'Capstone/project/modeling/optimized_simulations_summary.rds'))
+
 ```
